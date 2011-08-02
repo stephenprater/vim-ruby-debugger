@@ -191,8 +191,15 @@ endfunction
 
 
 " Get filename of current buffer
+" transforming it into the remote file name if necessary
 function! s:get_filename()
-  return expand("%:p")
+  let file_name = expand("%:p")
+  if has_key(g:RubyDebugger,'remote')
+    call s:log("Rewriting" . file_name)
+    let file_name = substitute(file_name, g:RubyDebugger.local_directory, g:RubyDebugger.remote_directory,"g") 
+    call s:log("Rewrote to" . file_name)
+  endif
+  return file_name
 endfunction
 
 
@@ -444,6 +451,34 @@ function! RubyDebugger.start(...) dict
   endfor
   call g:RubyDebugger.queue.add('start')
   echo "Debugger started"
+  call g:RubyDebugger.queue.execute()
+endfunction
+
+" Connect to a remote debugger
+function! RubyDebugger.connect(...) dict
+  if empty(a:1)
+    call g:RubyDebugger.start()
+  endif
+  call s:log("Executing :Rdebugger Connect...")
+  let server_params = split(a:1, ':')
+  echo server_params
+  let server_name = server_params[0]
+  let server_port = server_params[1]
+
+  let s:hostname = server_name
+  let s:debugger_port = server_port
+
+  let g:RubyDebugger.remote = 1
+  let g:RubyDebugger.remote_directory = a:2
+  let g:RubyDebugger.local_directory = a:3
+
+  let g:RubyDebugger.exceptions = []
+  for breakpoint in g:RubyDebugger.breakpoints
+    call g:RubyDebugger.queue.add(breakpoints.command())
+  endfor
+  call s:log("Executing start command")
+  call g:RubyDebugger.queue.add('start')
+  echo "Debugger connected!"
   call g:RubyDebugger.queue.execute()
 endfunction
 

@@ -22,6 +22,32 @@ function! RubyDebugger.start(...) dict
   call g:RubyDebugger.queue.execute()
 endfunction
 
+"Connect to a remote debugger
+function! RubyDebugger.connect(...) dict
+  if empty(a:1)
+    call g:RubyDebugger.start()
+  endif
+  call s:log("Executing :Rdebugger Connect...")
+  let server_params = split(a:1, ':')
+  echo server_params
+  let server_name = server_params[0]
+  let server_port = server_params[1]
+
+  let s:hostname = server_name
+  let s:debugger_port = server_port
+
+  let g:RubyDebugger.remote = 1
+  let g:RubyDebugger.remote_directory = a:2
+  let g:RubyDebugger.local_directory = a:3
+
+  let g:RubyDebugger.exceptions = []
+  for breakpoint in g:RubyDebugger.breakpoints
+    call g:RubyDebugger.queue.add(breakpoints.command())
+  endfor
+  call g:RubyDebugger.queue.add('start')
+  echo "Debugger connected!"
+  call g:RubyDebugger.queue.execute()
+endfunction
 
 " Stop running server.
 function! RubyDebugger.stop() dict
@@ -111,6 +137,7 @@ endfunction
 function! RubyDebugger.toggle_breakpoint(...) dict
   let line = line(".")
   let file = s:get_filename()
+  let remote_file = s:get_remote_filename()
   call s:log("Trying to toggle a breakpoint in the file " . file . ":" . line)
   let existed_breakpoints = filter(copy(g:RubyDebugger.breakpoints), 'v:val.line == ' . line . ' && v:val.file == "' . escape(file, '\') . '"')
   " If breakpoint with current file/line doesn't exist, create it. Otherwise -
@@ -159,6 +186,7 @@ endfunction
 function! RubyDebugger.conditional_breakpoint(exp) dict
   let line = line(".")
   let file = s:get_filename()
+  let remote_file = s:get_filename()
   let existed_breakpoints = filter(copy(g:RubyDebugger.breakpoints), 'v:val.line == ' . line . ' && v:val.file == "' . escape(file, '\') . '"')
   " If breakpoint with current file/line doesn't exist, create it. Otherwise -
   " remove it
@@ -255,6 +283,7 @@ endfunction
 " Debug current opened test
 function! RubyDebugger.run_test() dict
   let file = s:get_filename()
+  let remote_file = s:get_remote_filename()
   if file =~ '_spec\.rb$'
     call g:RubyDebugger.start(g:ruby_debugger_spec_path . ' ' . file)
   elseif file =~ '\.feature$'
