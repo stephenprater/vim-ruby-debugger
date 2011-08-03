@@ -17,9 +17,53 @@ function! s:Server.new(hostname, rdebug_port, debugger_port, runtime_dir, tmp_fi
   return var
 endfunction
 
+function! s:Server.new_remote(hostname, debugger_port, remote_path, local_path, runtime_dir, tmp_file, output_file)
+  let var = copy(self)
+  let var.hostname = a:hostname
+  let var.debugger_port = a:debugger_port 
+  let var.ruby_debugger = a:debugger_port
+  let var.runtime_dir = a:runtime_dir
+  let var.tmp_file = a:tmp_file
+  let var.output_file = a:output_file
+  let var.remote_path = a:remote_path
+  let var.local_path = a:local_path
+  let var.remote = 1
+  call s:log("Initializing Remote Connection to " . var.hostname . ":" . var.debugger_port)
+  return var
+endfunction
+
+function! s:Server.connect() dict
+  call s:log("Starting socket connection to " . self.hostname . ":" . self.debugger_port)
+  call self._stop_server(self.rdebug_port)
+  call s:log("Stopped local server, trying to restart")
+  
+  let debugger_parameters =  ' ' . self.hostname . ' ' . self.debugger_port. ' ' . self.debugger_port
+  let debugger_parameters .= ' ' . g:ruby_debugger_progname . ' ' . v:servername . ' "' . self.tmp_file
+  let debugger_parameters .= '" ' . os . ' ' . g:ruby_debugger_debug_mode . ' ' . s:logger_file
+  
+  if has("win32") || has("win64")
+    let debugger = 'ruby "' . expand(self.runtime_dir . "/bin/ruby_debugger.rb") . '"' . debugger_parameters
+    silent exe '! start '.debugger
+  else
+    let debugger_cmd = 'ruby ' . expand(self.runtime_dir) . "/bin/ruby_debugger.rb") . debugger_parameters . '&'
+    call s:log("Executing command: " . debugger_cmd)
+    call system(debugger_cmd)
+  endif
+
+  call s:log("Now we need to store PIDs of ruby_debugger, retrieving it: ")
+  let self.debugger_pid = self._get_pid(self.debugger_port, 1)
+  call s:log("Server PIDs is ruby_debugger.rb: " . self.debugger_pid)
+
+  call s:log("Debugger is successfully started")
+endfunction
 
 " Start the server. It will kill any listeners on given ports before.
 function! s:Server.start(script) dict
+  if has_key(self, 'remote')
+    call self.connect
+    return
+  endif
+
   call s:log("Starting Server, command: " . a:script)
   call s:log("Trying to kill all old servers first")
   call self._stop_server(self.rdebug_port)
@@ -60,7 +104,9 @@ endfunction
 
 " Kill servers and empty PIDs
 function! s:Server.stop() dict
-  call self._kill_process(self.rdebug_pid)
+  if !has_key(self, 'remote') 
+    call self._kill_process(self.rdebug_pid)
+  endif
   call self._kill_process(self.debugger_pid)
   let self.rdebug_pid = ""
   let self.debugger_pid = ""
@@ -69,7 +115,15 @@ endfunction
 
 " Return 1 if processes with set PID exist.
 function! s:Server.is_running() dict
-  return (self._get_pid(self.rdebug_port, 0) =~ '^\d\+$') && (self._get_pid(self.debugger_port, 0) =~ '^\d\+$')
+  if (self._get_pid(self.debugger_port, 0) =~ '^\d\+$')
+    if (self._get_pid(self.rdebug_port, 0) =~ '^\d\+$') 
+      return true
+    endif
+    if has_key(self,'remote')
+      return true
+    endif
+  endif
+  return false
 endfunction
 
 

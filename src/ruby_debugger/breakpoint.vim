@@ -5,9 +5,10 @@ let s:Breakpoint = { 'id': 0 }
 " ** Public methods
 
 " Constructor of new brekpoint. Create new breakpoint and set sign.
-function! s:Breakpoint.new(file, line)
+function! s:Breakpoint.new(file, line) 
   let var = copy(self)
   let var.file = a:file
+  let var.remote_file = s:rewrite_filename(var.file,'r')
   let var.line = a:line
   let s:Breakpoint.id += 1
   let var.id = s:Breakpoint.id
@@ -30,8 +31,12 @@ endfunction
 " will be evaluated after starting the server
 function! s:Breakpoint.add_condition(condition) dict
   let self.condition = a:condition
-  if has_key(g:RubyDebugger, 'server') && g:RubyDebugger.server.is_running() && has_key(self, 'debugger_id')
-    call g:RubyDebugger.queue.add(self.condition_command())
+  if has_key(self,'debugger_id')
+    if has_key(g:RubyDebugger, 'remote')
+      call g:RubyDebugger.queue.add(self.condition_command())
+    elseif has_key(g:RubyDebugger, 'server') && g:RubyDebugger.server.is_running()
+      call g:RubyDebugger.queue.add(self.condition_command())
+    endif
   endif
 endfunction
 
@@ -39,8 +44,8 @@ endfunction
 
 " Send adding breakpoint message to debugger, if it is run
 function! s:Breakpoint.send_to_debugger() dict
-  if has_key(g:RubyDebugger, 'server') && g:RubyDebugger.server.is_running()
-    call s:log("Server is running, so add command to Queue")
+  if has_key(g:RubyDebugger,'remote') || (has_key(g:RubyDebugger, 'server') && g:RubyDebugger.server.is_running())
+    call s:log("Server is running or Remote Connection, so add command to Queue")
     call g:RubyDebugger.queue.add(self.command())
   endif
 endfunction
@@ -48,7 +53,7 @@ endfunction
 
 " Command for setting breakpoint (e.g.: 'break /path/to/file:23')
 function! s:Breakpoint.command() dict
-  return 'break ' . self.file . ':' . self.line
+  return 'break ' . self.remote_file . ':' . self.line
 endfunction
 
 
@@ -108,7 +113,7 @@ endfunction
 " Send deleting breakpoint message to debugger, if it is run
 " (e.g.: 'delete 5')
 function! s:Breakpoint._send_delete_to_debugger() dict
-  if has_key(g:RubyDebugger, 'server') && g:RubyDebugger.server.is_running()
+  if has_key(g:RubyDebugger,'remote') || (has_key(g:RubyDebugger, 'server') && g:RubyDebugger.server.is_running())
     let message = 'delete ' . self.debugger_id
     call g:RubyDebugger.queue.add(message)
   endif

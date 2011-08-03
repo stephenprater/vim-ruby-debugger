@@ -1,9 +1,11 @@
 " Init section - set default values, highlight colors
 
 let s:rdebug_port = 39767
-let s:debugger_port = 39768
+let s:default_debugger_port = 39768
+let s:debugger_port = s:default_debugger_port
 " hostname() returns something strange in Windows (E98BD9A419BB41D), so set hostname explicitly
-let s:hostname = '127.0.0.1' "hostname()
+let s:default_hostname = '127.0.0.1' "hostname()
+let s:hostname = s:default_hostname
 " ~/.vim for Linux, vimfiles for Windows
 let s:runtime_dir = expand('<sfile>:h:h')
 " File for communicating between intermediate Ruby script ruby_debugger.rb and
@@ -36,6 +38,13 @@ fun! ruby_debugger#load_debugger()
   endif
 endf
 
+fun! ruby_debugger#statusline()
+  if &ft == 'ruby' 
+    return '[Rdb:' . g:RubyDebugger.status . '] '
+  else
+    return ''
+  endif
+endf
 
 " Check all requirements for the current plugin
 fun! s:check_prerequisites()
@@ -54,7 +63,7 @@ fun! s:check_prerequisites()
   endif
   if g:ruby_debugger_builtin_sender && !has("ruby")
     call add(problems, "RubyDebugger: You are trying to use built-in Ruby in Vim, but your Vim doesn't compiled with +ruby. Set g:ruby_debugger_builtin_sender = 0 in your .vimrc to resolve that issue.")
-  end
+  endif
   if empty(problems)
     return 1
   else
@@ -191,18 +200,32 @@ endfunction
 
 
 " Get filename of current buffer
-" transforming it into the remote file name if necessary
 function! s:get_filename()
-  let file_name = expand("%:p")
-  if has_key(g:RubyDebugger,'remote')
-    call s:log("Rewriting" . file_name)
-    let file_name = substitute(file_name, g:RubyDebugger.local_directory, g:RubyDebugger.remote_directory,"g") 
-    call s:log("Rewrote to" . file_name)
+  return expand("%:p")
+endfunction
+
+"rewrite local to remote filenames and vice versa
+function! s:rewrite_filename(file_name, type)
+  let file_name = a:file_name
+  if !has_key(g:RubyDebugger,'remote')
+    return file_name 
+  else
+    let old_filename = copy(file_name)
+    if a:type == 'remote' || a:type == 'r'
+      let new_file_name = substitute(file_name, g:RubyDebugger.local_directory, g:RubyDebugger.remote_directory,"g")
+    elseif a:type == 'local' || a:type == 'l'
+      let new_file_name = substitute(file_name, g:RubyDebugger.remote_directory, g:RubyDebugger.local_directory, "g")
+    endif
+    if old_filename == new_file_name
+      call s:log("Did not rewrite " . old_filename)
+    else
+      call s:log("Rewrote " . old_filename . " to " . new_file_name)
+    endif
+    return new_file_name
   endif
   return file_name
 endfunction
-
-
+      
 " Send message to debugger. This function should never be used explicitly,
 " only through g:RubyDebugger.send_command function
 function! s:send_message_to_debugger(message)
@@ -432,7 +455,7 @@ endfunction
 
 " *** Public interface (start)
 
-let RubyDebugger = { 'commands': {}, 'variables': {}, 'settings': {}, 'breakpoints': [], 'frames': [], 'exceptions': [] }
+let RubyDebugger = { 'commands': {}, 'variables': {}, 'settings': {}, 'breakpoints': [], 'frames': [], 'exceptions': [], 'status': 'inactive'}
 let g:RubyDebugger.queue = s:Queue.new()
 
 
@@ -451,10 +474,11 @@ function! RubyDebugger.start(...) dict
   endfor
   call g:RubyDebugger.queue.add('start')
   echo "Debugger started"
+  let g:RubyDebugger.status = 'local'
   call g:RubyDebugger.queue.execute()
 endfunction
 
-" Connect to a remote debugger
+"Connect to a remote debugger
 function! RubyDebugger.connect(...) dict
   if empty(a:1)
     call g:RubyDebugger.start()
@@ -472,21 +496,43 @@ function! RubyDebugger.connect(...) dict
   let g:RubyDebugger.remote_directory = a:2
   let g:RubyDebugger.local_directory = a:3
 
+  let g:RubyDebugger.server = s:Server.new_remote(s:hostname, s:debugger_port, g:RubyDebugger.remote_directory, g:RubyDebugger.local_directory, s:runtime_dir, s:tmp_file, s:server_output_file)
+  call g:RubyDebugger.server.connect()
+
   let g:RubyDebugger.exceptions = []
   for breakpoint in g:RubyDebugger.breakpoints
     call g:RubyDebugger.queue.add(breakpoints.command())
   endfor
-  call s:log("Executing start command")
   call g:RubyDebugger.queue.add('start')
   echo "Debugger connected!"
+  let g:RubyDebugger.status = 'remote'
   call g:RubyDebugger.queue.execute()
 endfunction
-
 
 " Stop running server.
 function! RubyDebugger.stop() dict
   if has_key(g:RubyDebugger, 'server')
     call g:RubyDebugger.server.stop()
+  elseif has_key(g:RubyDebugger, 'remote')
+    let s:hostname = s:default_hostname
+    let s:debugger_port = s.default_debugger_port
+    unlet g:RubyDebugger.remote
+  endif
+  let g:RubyDebugger.status = 'inactive'
+endfunction
+
+"send interrupt to the server
+function! RubyDebugger.interrupt() dict
+  if has_key(g:RubyDebugger,'remote') || has_key(g:RubyDebugger, 'server')  && g:RubyDebugger.server.is_running
+    call g:RubyDebugger.queue.add('interrupt')
+  endif
+endfunction
+
+"quit the remote program - there's no facility fo relaunching so you better be
+"sure!
+function! RubyDebugger.quit() dict
+  if has_key(g:RubyDebugger,'remote') || has_key(g:RubyDebugger, 'server')  && g:RubyDebugger.server.is_running
+    call g:RubyDebugger.queue.add('quit')
   endif
 endfunction
 
@@ -571,7 +617,9 @@ endfunction
 function! RubyDebugger.toggle_breakpoint(...) dict
   let line = line(".")
   let file = s:get_filename()
-  call s:log("Trying to toggle a breakpoint in the file " . file . ":" . line)
+  " that's basically just for the log
+  let remote_file = s:rewrite_filename(file,'r')
+  call s:log("Trying to toggle a breakpoint in the file " . (remote_file ? remote_file : file) . ":" . line)
   let existed_breakpoints = filter(copy(g:RubyDebugger.breakpoints), 'v:val.line == ' . line . ' && v:val.file == "' . escape(file, '\') . '"')
   " If breakpoint with current file/line doesn't exist, create it. Otherwise -
   " remove it
@@ -738,11 +786,11 @@ endfunction
 " Jump to file/line where execution was suspended, set current line sign and get local variables
 function! RubyDebugger.commands.jump_to_breakpoint(cmd) dict
   let attrs = s:get_tag_attributes(a:cmd) 
-  call s:jump_to_file(attrs.file, attrs.line)
+  call s:jump_to_file(s:rewrite_filname(attrs.file,'l'), attrs.line)
   call s:log("Jumped to breakpoint " . attrs.file . ":" . attrs.line)
 
   if has("signs")
-    exe ":sign place " . s:current_line_sign_id . " line=" . attrs.line . " name=current_line file=" . attrs.file
+    exe ":sign place " . s:current_line_sign_id . " line=" . attrs.line . " name=current_line file=" . s:rewrite_filename(attrs.file,'l')
   endif
 endfunction
 
@@ -773,6 +821,7 @@ function! RubyDebugger.commands.set_breakpoint(cmd)
   call s:log("Received the breakpoint message, will add PID and number of breakpoint to the Breakpoint object")
   let attrs = s:get_tag_attributes(a:cmd)
   let file_match = matchlist(attrs.location, '\(.*\):\(.*\)')
+  let file_match[1] = s:rewrite_filename(file_match[1],'l') 
   let pid = g:RubyDebugger.server.rdebug_pid
 
   " Find added breakpoint in array and assign debugger's info to it
@@ -1051,7 +1100,7 @@ function! s:Window.toggle() dict
     call self.close()
   else
     call self.open()
-  end
+  endif
 endfunction
 
 
@@ -1319,7 +1368,7 @@ function! s:Var.new(attrs)
     return s:VarParent.new(a:attrs)
   else
     return s:VarChild.new(a:attrs)
-  end
+  endif
 endfunction
 
 
@@ -1574,7 +1623,7 @@ function! s:VarParent.add_childs(childs)
     let a:childs.parent = self
     let child.level = self.level + 1
     call add(self.children, a:childs)
-  end
+  endif
 endfunction
 
 
@@ -1667,9 +1716,10 @@ let s:Breakpoint = { 'id': 0 }
 " ** Public methods
 
 " Constructor of new brekpoint. Create new breakpoint and set sign.
-function! s:Breakpoint.new(file, line)
+function! s:Breakpoint.new(file, line) 
   let var = copy(self)
   let var.file = a:file
+  let var.remote_file = s:rewrite_filename(var.file,'r')
   let var.line = a:line
   let s:Breakpoint.id += 1
   let var.id = s:Breakpoint.id
@@ -1692,8 +1742,12 @@ endfunction
 " will be evaluated after starting the server
 function! s:Breakpoint.add_condition(condition) dict
   let self.condition = a:condition
-  if has_key(g:RubyDebugger, 'server') && g:RubyDebugger.server.is_running() && has_key(self, 'debugger_id')
-    call g:RubyDebugger.queue.add(self.condition_command())
+  if has_key(self,'debugger_id')
+    if has_key(g:RubyDebugger, 'remote')
+      call g:RubyDebugger.queue.add(self.condition_command())
+    elseif has_key(g:RubyDebugger, 'server') && g:RubyDebugger.server.is_running()
+      call g:RubyDebugger.queue.add(self.condition_command())
+    endif
   endif
 endfunction
 
@@ -1701,8 +1755,8 @@ endfunction
 
 " Send adding breakpoint message to debugger, if it is run
 function! s:Breakpoint.send_to_debugger() dict
-  if has_key(g:RubyDebugger, 'server') && g:RubyDebugger.server.is_running()
-    call s:log("Server is running, so add command to Queue")
+  if has_key(g:RubyDebugger,'remote') || (has_key(g:RubyDebugger, 'server') && g:RubyDebugger.server.is_running())
+    call s:log("Server is running or Remote Connection, so add command to Queue")
     call g:RubyDebugger.queue.add(self.command())
   endif
 endfunction
@@ -1710,7 +1764,7 @@ endfunction
 
 " Command for setting breakpoint (e.g.: 'break /path/to/file:23')
 function! s:Breakpoint.command() dict
-  return 'break ' . self.file . ':' . self.line
+  return 'break ' . self.remote_file . ':' . self.line
 endfunction
 
 
@@ -1770,7 +1824,7 @@ endfunction
 " Send deleting breakpoint message to debugger, if it is run
 " (e.g.: 'delete 5')
 function! s:Breakpoint._send_delete_to_debugger() dict
-  if has_key(g:RubyDebugger, 'server') && g:RubyDebugger.server.is_running()
+  if has_key(g:RubyDebugger,'remote') || (has_key(g:RubyDebugger, 'server') && g:RubyDebugger.server.is_running())
     let message = 'delete ' . self.debugger_id
     call g:RubyDebugger.queue.add(message)
   endif
@@ -1824,7 +1878,8 @@ let s:Frame = { }
 function! s:Frame.new(attrs)
   let var = copy(self)
   let var.no = a:attrs.no
-  let var.file = a:attrs.file
+  let var.remote_file = a:attrs.file
+  let var.file = s:rewrite_filename(var.remote_file,'l')
   let var.line = a:attrs.line
   if has_key(a:attrs, 'current')
     let var.current = (a:attrs.current == 'true')
@@ -1903,9 +1958,53 @@ function! s:Server.new(hostname, rdebug_port, debugger_port, runtime_dir, tmp_fi
   return var
 endfunction
 
+function! s:Server.new_remote(hostname, debugger_port, remote_path, local_path, runtime_dir, tmp_file, output_file)
+  let var = copy(self)
+  let var.hostname = a:hostname
+  let var.debugger_port = a:debugger_port 
+  let var.ruby_debugger = a:debugger_port
+  let var.runtime_dir = a:runtime_dir
+  let var.tmp_file = a:tmp_file
+  let var.output_file = a:output_file
+  let var.remote_path = a:remote_path
+  let var.local_path = a:local_path
+  let var.remote = 1
+  call s:log("Initializing Remote Connection to " . var.hostname . ":" . var.debugger_port)
+  return var
+endfunction
+
+function! s:Server.connect() dict
+  call s:log("Starting socket connection to " . self.hostname . ":" . self.debugger_port)
+  call self._stop_server(self.rdebug_port)
+  call s:log("Stopped local server, trying to restart")
+  
+  let debugger_parameters =  ' ' . self.hostname . ' ' . self.debugger_port. ' ' . self.debugger_port
+  let debugger_parameters .= ' ' . g:ruby_debugger_progname . ' ' . v:servername . ' "' . self.tmp_file
+  let debugger_parameters .= '" ' . os . ' ' . g:ruby_debugger_debug_mode . ' ' . s:logger_file
+  
+  if has("win32") || has("win64")
+    let debugger = 'ruby "' . expand(self.runtime_dir . "/bin/ruby_debugger.rb") . '"' . debugger_parameters
+    silent exe '! start '.debugger
+  else
+    let debugger_cmd = 'ruby ' . expand(self.runtime_dir) . "/bin/ruby_debugger.rb") . debugger_parameters . '&'
+    call s:log("Executing command: " . debugger_cmd)
+    call system(debugger_cmd)
+  endif
+
+  call s:log("Now we need to store PIDs of ruby_debugger, retrieving it: ")
+  let self.debugger_pid = self._get_pid(self.debugger_port, 1)
+  call s:log("Server PIDs is ruby_debugger.rb: " . self.debugger_pid)
+
+  call s:log("Debugger is successfully started")
+endfunction
 
 " Start the server. It will kill any listeners on given ports before.
 function! s:Server.start(script) dict
+  if has_key(self, 'remote')
+    call self.connect
+    return
+  endif
+
   call s:log("Starting Server, command: " . a:script)
   call s:log("Trying to kill all old servers first")
   call self._stop_server(self.rdebug_port)
@@ -1946,7 +2045,9 @@ endfunction
 
 " Kill servers and empty PIDs
 function! s:Server.stop() dict
-  call self._kill_process(self.rdebug_pid)
+  if !has_key(self, 'remote') 
+    call self._kill_process(self.rdebug_pid)
+  endif
   call self._kill_process(self.debugger_pid)
   let self.rdebug_pid = ""
   let self.debugger_pid = ""
@@ -1955,7 +2056,15 @@ endfunction
 
 " Return 1 if processes with set PID exist.
 function! s:Server.is_running() dict
-  return (self._get_pid(self.rdebug_port, 0) =~ '^\d\+$') && (self._get_pid(self.debugger_port, 0) =~ '^\d\+$')
+  if (self._get_pid(self.debugger_port, 0) =~ '^\d\+$')
+    if (self._get_pid(self.rdebug_port, 0) =~ '^\d\+$') 
+      return true
+    endif
+    if has_key(self,'remote')
+      return true
+    endif
+  endif
+  return false
 endfunction
 
 

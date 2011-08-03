@@ -1,9 +1,11 @@
 " Init section - set default values, highlight colors
 
 let s:rdebug_port = 39767
-let s:debugger_port = 39768
+let s:default_debugger_port = 39768
+let s:debugger_port = s:default_debugger_port
 " hostname() returns something strange in Windows (E98BD9A419BB41D), so set hostname explicitly
-let s:hostname = '127.0.0.1' "hostname()
+let s:default_hostname = '127.0.0.1' "hostname()
+let s:hostname = s:default_hostname
 " ~/.vim for Linux, vimfiles for Windows
 let s:runtime_dir = expand('<sfile>:h:h')
 " File for communicating between intermediate Ruby script ruby_debugger.rb and
@@ -36,6 +38,13 @@ fun! ruby_debugger#load_debugger()
   endif
 endf
 
+fun! ruby_debugger#statusline()
+  if &ft == 'ruby' 
+    return '[Rdb:' . g:RubyDebugger.status . '] '
+  else
+    return ''
+  endif
+endf
 
 " Check all requirements for the current plugin
 fun! s:check_prerequisites()
@@ -54,7 +63,7 @@ fun! s:check_prerequisites()
   endif
   if g:ruby_debugger_builtin_sender && !has("ruby")
     call add(problems, "RubyDebugger: You are trying to use built-in Ruby in Vim, but your Vim doesn't compiled with +ruby. Set g:ruby_debugger_builtin_sender = 0 in your .vimrc to resolve that issue.")
-  end
+  endif
   if empty(problems)
     return 1
   else

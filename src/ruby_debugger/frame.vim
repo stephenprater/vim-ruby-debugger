@@ -9,7 +9,8 @@ let s:Frame = { }
 function! s:Frame.new(attrs)
   let var = copy(self)
   let var.no = a:attrs.no
-  let var.file = a:attrs.file
+  let var.remote_file = a:attrs.file
+  let var.file = s:rewrite_filename(var.remote_file,'l')
   let var.line = a:attrs.line
   if has_key(a:attrs, 'current')
     let var.current = (a:attrs.current == 'true')

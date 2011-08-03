@@ -65,7 +65,7 @@ function! s:VarParent.add_childs(childs)
     let a:childs.parent = self
     let child.level = self.level + 1
     call add(self.children, a:childs)
-  end
+  endif
 endfunction
 
 

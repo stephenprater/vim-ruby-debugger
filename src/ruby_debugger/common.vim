@@ -124,17 +124,28 @@ function! s:get_filename()
   return expand("%:p")
 endfunction
 
-"Get the remote filename of the current buffer
-function! s:get_remote_filename()
-  let file_name = expand("%:p")
-  if has_key(g:RubyDebugger,'remote')
-    call s:log("Rewriting" . file_name)
-    let file_name = substitute(file_name, g:RubyDebugger.local_directory, g:RubyDebugger.remote_directory,"g") 
-    call s:log("Rewrote to" . file_name)
+"rewrite local to remote filenames and vice versa
+function! s:rewrite_filename(file_name, type)
+  let file_name = a:file_name
+  if !has_key(g:RubyDebugger,'remote')
+    return file_name 
+  else
+    let old_filename = copy(file_name)
+    if a:type == 'remote' || a:type == 'r'
+      let new_file_name = substitute(file_name, g:RubyDebugger.local_directory, g:RubyDebugger.remote_directory,"g")
+    elseif a:type == 'local' || a:type == 'l'
+      let new_file_name = substitute(file_name, g:RubyDebugger.remote_directory, g:RubyDebugger.local_directory, "g")
+    endif
+    if old_filename == new_file_name
+      call s:log("Did not rewrite " . old_filename)
+    else
+      call s:log("Rewrote " . old_filename . " to " . new_file_name)
+    endif
+    return new_file_name
   endif
   return file_name
-end
-
+endfunction
+      
 " Send message to debugger. This function should never be used explicitly,
 " only through g:RubyDebugger.send_command function
 function! s:send_message_to_debugger(message)

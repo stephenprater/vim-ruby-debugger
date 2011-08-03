@@ -1,6 +1,6 @@
 " *** Public interface (start)
 
-let RubyDebugger = { 'commands': {}, 'variables': {}, 'settings': {}, 'breakpoints': [], 'frames': [], 'exceptions': [] }
+let RubyDebugger = { 'commands': {}, 'variables': {}, 'settings': {}, 'breakpoints': [], 'frames': [], 'exceptions': [], 'status': 'inactive'}
 let g:RubyDebugger.queue = s:Queue.new()
 
 
@@ -19,6 +19,7 @@ function! RubyDebugger.start(...) dict
   endfor
   call g:RubyDebugger.queue.add('start')
   echo "Debugger started"
+  let g:RubyDebugger.status = 'local'
   call g:RubyDebugger.queue.execute()
 endfunction
 
@@ -40,12 +41,16 @@ function! RubyDebugger.connect(...) dict
   let g:RubyDebugger.remote_directory = a:2
   let g:RubyDebugger.local_directory = a:3
 
+  let g:RubyDebugger.server = s:Server.new_remote(s:hostname, s:debugger_port, g:RubyDebugger.remote_directory, g:RubyDebugger.local_directory, s:runtime_dir, s:tmp_file, s:server_output_file)
+  call g:RubyDebugger.server.connect()
+
   let g:RubyDebugger.exceptions = []
   for breakpoint in g:RubyDebugger.breakpoints
     call g:RubyDebugger.queue.add(breakpoints.command())
   endfor
   call g:RubyDebugger.queue.add('start')
   echo "Debugger connected!"
+  let g:RubyDebugger.status = 'remote'
   call g:RubyDebugger.queue.execute()
 endfunction
 
@@ -53,6 +58,26 @@ endfunction
 function! RubyDebugger.stop() dict
   if has_key(g:RubyDebugger, 'server')
     call g:RubyDebugger.server.stop()
+  elseif has_key(g:RubyDebugger, 'remote')
+    let s:hostname = s:default_hostname
+    let s:debugger_port = s.default_debugger_port
+    unlet g:RubyDebugger.remote
+  endif
+  let g:RubyDebugger.status = 'inactive'
+endfunction
+
+"send interrupt to the server
+function! RubyDebugger.interrupt() dict
+  if has_key(g:RubyDebugger,'remote') || has_key(g:RubyDebugger, 'server')  && g:RubyDebugger.server.is_running
+    call g:RubyDebugger.queue.add('interrupt')
+  endif
+endfunction
+
+"quit the remote program - there's no facility fo relaunching so you better be
+"sure!
+function! RubyDebugger.quit() dict
+  if has_key(g:RubyDebugger,'remote') || has_key(g:RubyDebugger, 'server')  && g:RubyDebugger.server.is_running
+    call g:RubyDebugger.queue.add('quit')
   endif
 endfunction
 
@@ -137,8 +162,9 @@ endfunction
 function! RubyDebugger.toggle_breakpoint(...) dict
   let line = line(".")
   let file = s:get_filename()
-  let remote_file = s:get_remote_filename()
-  call s:log("Trying to toggle a breakpoint in the file " . file . ":" . line)
+  " that's basically just for the log
+  let remote_file = s:rewrite_filename(file,'r')
+  call s:log("Trying to toggle a breakpoint in the file " . (remote_file ? remote_file : file) . ":" . line)
   let existed_breakpoints = filter(copy(g:RubyDebugger.breakpoints), 'v:val.line == ' . line . ' && v:val.file == "' . escape(file, '\') . '"')
   " If breakpoint with current file/line doesn't exist, create it. Otherwise -
   " remove it
@@ -186,7 +212,6 @@ endfunction
 function! RubyDebugger.conditional_breakpoint(exp) dict
   let line = line(".")
   let file = s:get_filename()
-  let remote_file = s:get_filename()
   let existed_breakpoints = filter(copy(g:RubyDebugger.breakpoints), 'v:val.line == ' . line . ' && v:val.file == "' . escape(file, '\') . '"')
   " If breakpoint with current file/line doesn't exist, create it. Otherwise -
   " remove it
@@ -283,7 +308,6 @@ endfunction
 " Debug current opened test
 function! RubyDebugger.run_test() dict
   let file = s:get_filename()
-  let remote_file = s:get_remote_filename()
   if file =~ '_spec\.rb$'
     call g:RubyDebugger.start(g:ruby_debugger_spec_path . ' ' . file)
   elseif file =~ '\.feature$'

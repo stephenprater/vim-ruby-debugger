@@ -6,11 +6,11 @@
 " Jump to file/line where execution was suspended, set current line sign and get local variables
 function! RubyDebugger.commands.jump_to_breakpoint(cmd) dict
   let attrs = s:get_tag_attributes(a:cmd) 
-  call s:jump_to_file(attrs.file, attrs.line)
+  call s:jump_to_file(s:rewrite_filname(attrs.file,'l'), attrs.line)
   call s:log("Jumped to breakpoint " . attrs.file . ":" . attrs.line)
 
   if has("signs")
-    exe ":sign place " . s:current_line_sign_id . " line=" . attrs.line . " name=current_line file=" . attrs.file
+    exe ":sign place " . s:current_line_sign_id . " line=" . attrs.line . " name=current_line file=" . s:rewrite_filename(attrs.file,'l')
   endif
 endfunction
 
@@ -41,6 +41,7 @@ function! RubyDebugger.commands.set_breakpoint(cmd)
   call s:log("Received the breakpoint message, will add PID and number of breakpoint to the Breakpoint object")
   let attrs = s:get_tag_attributes(a:cmd)
   let file_match = matchlist(attrs.location, '\(.*\):\(.*\)')
+  let file_match[1] = s:rewrite_filename(file_match[1],'l') 
   let pid = g:RubyDebugger.server.rdebug_pid
 
   " Find added breakpoint in array and assign debugger's info to it
