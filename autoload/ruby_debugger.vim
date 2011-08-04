@@ -1,8 +1,12 @@
 " Init section - set default values, highlight colors
 
-let s:rdebug_port = 39767
-let s:default_debugger_port = 39768
-let s:debugger_port = s:default_debugger_port
+"this is the port that that rdebug-ide listens on
+let s:default_rdebug_port = 1234
+let s:rdebug_port = s:default_rdebug_port 
+
+"this is the port that ruby-debugger.rb listens on
+let s:relay_port = 39768
+
 " hostname() returns something strange in Windows (E98BD9A419BB41D), so set hostname explicitly
 let s:default_hostname = '127.0.0.1' "hostname()
 let s:hostname = s:default_hostname
@@ -229,10 +233,12 @@ endfunction
 " Send message to debugger. This function should never be used explicitly,
 " only through g:RubyDebugger.send_command function
 function! s:send_message_to_debugger(message)
+  " the ruby_debugger proxy can be counted on to be running locally - so just 
+  " send directly to 127.0.0.1:39768 - which is the local proxy
   call s:log("Sending a message to ruby_debugger.rb: '" . a:message . "'")
   if g:ruby_debugger_fast_sender
     call s:log("Trying to use experimental 'fast_sender'")
-    let cmd = s:runtime_dir . "/bin/socket " . s:hostname . " " . s:debugger_port . " \"" . a:message . "\""
+    let cmd = s:runtime_dir . "/bin/socket 127.0.0.1  " . s:relay_port . " \"" . a:message . "\""
     call s:log("Executing command: " . cmd)
     call system(cmd)
   else
@@ -242,8 +248,8 @@ ruby << RUBY
   require 'socket'
   attempts = 0
   a = nil
-  host = VIM::evaluate("s:hostname")
-  port = VIM::evaluate("s:debugger_port")
+  host = '127.0.0.1'
+  port = VIM::evaluate("s:relay_port")
   message = VIM::evaluate("a:message").gsub("\\\"", '"')
   begin
     a = TCPSocket.open(host, port)
@@ -267,7 +273,7 @@ RUBY
       let script .= "attempts = 0; "
       let script .= "a = nil; "
       let script .= "begin; "
-      let script .=   "a = TCPSocket.open('" . s:hostname . "', " . s:debugger_port . "); "
+      let script .=   "a = TCPSocket.open('127.0.0.1', " . s:relay_port . "); "
       let script .=   "a.puts(%q[" . substitute(substitute(a:message, '[', '\[', 'g'), ']', '\]', 'g') . "]);"
       let script .=   "a.close; "
       let script .= "rescue Errno::ECONNREFUSED; "
@@ -276,7 +282,7 @@ RUBY
       let script .=     "sleep 0.05; "
       let script .=     "retry; "
       let script .=   "else; "
-      let script .=     "puts('" . s:hostname . ":" . s:debugger_port . " can not be opened'); "
+      let script .=     "puts('127.0.0.1':" . s:relay_port . " can not be opened'); "
       let script .=     "exit; "
       let script .=   "end; "
       let script .= "ensure; "
@@ -463,7 +469,7 @@ let g:RubyDebugger.queue = s:Queue.new()
 " ruby script ('script/server webrick' by default)
 function! RubyDebugger.start(...) dict
   call s:log("Executing :Rdebugger...")
-  let g:RubyDebugger.server = s:Server.new(s:hostname, s:rdebug_port, s:debugger_port, s:runtime_dir, s:tmp_file, s:server_output_file)
+  let g:RubyDebugger.server = s:Server.new(s:hostname, s:rdebug_port, s:relay_port, s:runtime_dir, s:tmp_file, s:server_output_file)
   let script_string = a:0 && !empty(a:1) ? a:1 : g:ruby_debugger_default_script
   echo "Loading debugger..."
   call g:RubyDebugger.server.start(s:get_escaped_absolute_path(script_string))
@@ -490,13 +496,13 @@ function! RubyDebugger.connect(...) dict
   let server_port = server_params[1]
 
   let s:hostname = server_name
-  let s:debugger_port = server_port
+  let s:rdebug_port = server_port
 
   let g:RubyDebugger.remote = 1
   let g:RubyDebugger.remote_directory = a:2
   let g:RubyDebugger.local_directory = a:3
 
-  let g:RubyDebugger.server = s:Server.new_remote(s:hostname, s:debugger_port, g:RubyDebugger.remote_directory, g:RubyDebugger.local_directory, s:runtime_dir, s:tmp_file, s:server_output_file)
+  let g:RubyDebugger.server = s:Server.new_remote(s:hostname, s:rdebug_port, s:relay_port, s:runtime_dir, s:tmp_file, s:server_output_file)
   call g:RubyDebugger.server.connect()
 
   let g:RubyDebugger.exceptions = []
@@ -515,7 +521,7 @@ function! RubyDebugger.stop() dict
     call g:RubyDebugger.server.stop()
   elseif has_key(g:RubyDebugger, 'remote')
     let s:hostname = s:default_hostname
-    let s:debugger_port = s.default_debugger_port
+    let s:rdebug_port = s.default_debugger_port
     unlet g:RubyDebugger.remote
   endif
   let g:RubyDebugger.status = 'inactive'
@@ -1946,53 +1952,52 @@ let s:Server = {}
 " ** Public methods
 
 " Constructor of new server. Just inits it, not runs
-function! s:Server.new(hostname, rdebug_port, debugger_port, runtime_dir, tmp_file, output_file) dict
+function! s:Server.new(hostname, rdebug_port, relay_port, runtime_dir, tmp_file, output_file) dict
   let var = copy(self)
   let var.hostname = a:hostname
   let var.rdebug_port = a:rdebug_port
-  let var.debugger_port = a:debugger_port
+  let var.relay_port = a:relay_port
   let var.runtime_dir = a:runtime_dir
   let var.tmp_file = a:tmp_file
   let var.output_file = a:output_file
-  call s:log("Initializing Server object, with variables: hostname: " . var.hostname . ", rdebug_port: " . var.rdebug_port . ", debugger_port: " . var.debugger_port . ", runtime_dir: " . var.runtime_dir . ", tmp_file: " . var.tmp_file . ", output_file: " . var.output_file)
+  call s:log("Initializing Server object, with variables: hostname: " . var.hostname . ", rdebug_port: " . var.rdebug_port . ", relay_port: " . var.relay_port . ", runtime_dir: " . var.runtime_dir . ", tmp_file: " . var.tmp_file . ", output_file: " . var.output_file)
   return var
 endfunction
 
-function! s:Server.new_remote(hostname, debugger_port, remote_path, local_path, runtime_dir, tmp_file, output_file)
+function! s:Server.new_remote(hostname, rdebug_port, relay_port, runtime_dir, tmp_file, output_file) dict
   let var = copy(self)
   let var.hostname = a:hostname
-  let var.debugger_port = a:debugger_port 
-  let var.ruby_debugger = a:debugger_port
+  let var.relay_port = a:relay_port
+  let var.rdebug_port = a:rdebug_port
   let var.runtime_dir = a:runtime_dir
   let var.tmp_file = a:tmp_file
   let var.output_file = a:output_file
-  let var.remote_path = a:remote_path
-  let var.local_path = a:local_path
   let var.remote = 1
-  call s:log("Initializing Remote Connection to " . var.hostname . ":" . var.debugger_port)
+  call s:log("Initializing Remote Connection to " . var.hostname . ":" . var.rdebug_port)
   return var
 endfunction
 
 function! s:Server.connect() dict
-  call s:log("Starting socket connection to " . self.hostname . ":" . self.debugger_port)
-  call self._stop_server(self.rdebug_port)
+  call s:log("Starting local socket connection to " . self.hostname . ":" . self.relay_port)
+  call self._stop_server(self.relay_port)
   call s:log("Stopped local server, trying to restart")
+  let os = has("win32") || has("win64") ? 'win' : 'posix'
   
-  let debugger_parameters =  ' ' . self.hostname . ' ' . self.debugger_port. ' ' . self.debugger_port
+  let debugger_parameters =  ' ' . self.hostname . ' ' . self.rdebug_port. ' ' . self.relay_port
   let debugger_parameters .= ' ' . g:ruby_debugger_progname . ' ' . v:servername . ' "' . self.tmp_file
   let debugger_parameters .= '" ' . os . ' ' . g:ruby_debugger_debug_mode . ' ' . s:logger_file
   
   if has("win32") || has("win64")
-    let debugger = 'ruby "' . expand(self.runtime_dir . "/bin/ruby_debugger.rb") . '"' . debugger_parameters
-    silent exe '! start '.debugger
+    let debugger_cmd = 'ruby "' . expand(self.runtime_dir . "/bin/ruby_debugger.rb") . '"' . debugger_parameters
+    silent exe '! start '.debugger_cmd
   else
-    let debugger_cmd = 'ruby ' . expand(self.runtime_dir) . "/bin/ruby_debugger.rb") . debugger_parameters . '&'
+    let debugger_cmd = 'ruby ' . expand(self.runtime_dir . "/bin/ruby_debugger.rb") . debugger_parameters . '&'
     call s:log("Executing command: " . debugger_cmd)
     call system(debugger_cmd)
   endif
 
   call s:log("Now we need to store PIDs of ruby_debugger, retrieving it: ")
-  let self.debugger_pid = self._get_pid(self.debugger_port, 1)
+  let self.debugger_pid = self._get_pid(self.relay_port, 1)
   call s:log("Server PIDs is ruby_debugger.rb: " . self.debugger_pid)
 
   call s:log("Debugger is successfully started")
@@ -2008,14 +2013,14 @@ function! s:Server.start(script) dict
   call s:log("Starting Server, command: " . a:script)
   call s:log("Trying to kill all old servers first")
   call self._stop_server(self.rdebug_port)
-  call self._stop_server(self.debugger_port)
+  call self._stop_server(self.relay_port)
   call s:log("Servers are killed, trying to start new servers")
   " Remove leading and trailing quotes
   let script_name = substitute(a:script, "\\(^['\"]\\|['\"]$\\)", '', 'g')
   let rdebug = 'rdebug-ide -p ' . self.rdebug_port . ' -- ' . script_name
   let os = has("win32") || has("win64") ? 'win' : 'posix'
   " Example - ruby ~/.vim/bin/ruby_debugger.rb 39767 39768 vim VIM /home/anton/.vim/tmp/ruby_debugger posix
-  let debugger_parameters =  ' ' . self.hostname . ' ' . self.rdebug_port . ' ' . self.debugger_port
+  let debugger_parameters =  ' ' . self.hostname . ' ' . self.rdebug_port . ' ' . self.relay_port
   let debugger_parameters .= ' ' . g:ruby_debugger_progname . ' ' . v:servername . ' "' . self.tmp_file
   let debugger_parameters .= '" ' . os . ' ' . g:ruby_debugger_debug_mode . ' ' . s:logger_file
 
@@ -2036,7 +2041,7 @@ function! s:Server.start(script) dict
   " Set PIDs of processes
   call s:log("Now we need to store PIDs of servers, retrieving them: ")
   let self.rdebug_pid = self._get_pid(self.rdebug_port, 1)
-  let self.debugger_pid = self._get_pid(self.debugger_port, 1)
+  let self.debugger_pid = self._get_pid(self.relay_port, 1)
   call s:log("Server PIDs are: rdebug-ide: " . self.rdebug_pid . ", ruby_debugger.rb: " . self.debugger_pid)
 
   call s:log("Debugger is successfully started")
@@ -2056,9 +2061,11 @@ endfunction
 
 " Return 1 if processes with set PID exist.
 function! s:Server.is_running() dict
-  if (self._get_pid(self.debugger_port, 0) =~ '^\d\+$')
-    if (self._get_pid(self.rdebug_port, 0) =~ '^\d\+$') 
-      return true
+  if (self._get_pid(self.relay_port, 0) =~ '^\d\+$')
+    if !has_key(self,'remote')
+      if (self._get_pid(self.rdebug_port, 0) =~ '^\d\+$') 
+        return true
+      endif
     endif
     if has_key(self,'remote')
       return true
@@ -2069,6 +2076,7 @@ endfunction
 
 
 " ** Private methods
+"
 
 
 " Get PID of process, that listens given port on given host. If must_get_pid
@@ -2090,12 +2098,25 @@ endfunction
 " Just try to get PID of process and return empty string if it was
 " unsuccessful
 function! s:Server._get_pid_attempt(port)
-  call s:log("Trying to find listener of port " . a:port)
   if has("win32") || has("win64")
+    call s:log("Trying to find listener of port " . a:port)
     let netstat = system("netstat -anop tcp")
     let pid_match = matchlist(netstat, ':' . a:port . '\s.\{-}LISTENING\s\+\(\d\+\)')
     let pid = len(pid_match) > 0 ? pid_match[1] : ""
+  elseif has("macunix")
+    "lsof is dog slow on the mac - just do it this way
+    if a:port == s:relay_port
+      call s:log("Trying to find ruby_debugger process") 
+      let cmd = "ps aux | grep 'ruby_debugger' | head -n 1 | cut -f 2 -d ' '"
+    elseif a:port == s:rdebug_port
+      call s:log("Trying to find rdebug-ide process") 
+      let cmd = "ps aux | grep 'rdebug-ide' | head -n 1 | cut -f 2 -d ' '" 
+    endif
+    call s:log("Executing command: " . cmd)
+    let pid = system(cmd)
+    let pid = substitute(pid, '\n', '', '')
   elseif executable('lsof')
+    call s:log("Trying to find listener of port " . a:port)
     let cmd = "lsof -i tcp:" . a:port . " | grep LISTEN | awk '{print $2}'"
     call s:log("Executing command: " . cmd)
     let pid = system(cmd)

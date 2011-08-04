@@ -149,10 +149,12 @@ endfunction
 " Send message to debugger. This function should never be used explicitly,
 " only through g:RubyDebugger.send_command function
 function! s:send_message_to_debugger(message)
+  " the ruby_debugger proxy can be counted on to be running locally - so just 
+  " send directly to 127.0.0.1:39768 - which is the local proxy
   call s:log("Sending a message to ruby_debugger.rb: '" . a:message . "'")
   if g:ruby_debugger_fast_sender
     call s:log("Trying to use experimental 'fast_sender'")
-    let cmd = s:runtime_dir . "/bin/socket " . s:hostname . " " . s:debugger_port . " \"" . a:message . "\""
+    let cmd = s:runtime_dir . "/bin/socket 127.0.0.1  " . s:relay_port . " \"" . a:message . "\""
     call s:log("Executing command: " . cmd)
     call system(cmd)
   else
@@ -162,8 +164,8 @@ ruby << RUBY
   require 'socket'
   attempts = 0
   a = nil
-  host = VIM::evaluate("s:hostname")
-  port = VIM::evaluate("s:debugger_port")
+  host = '127.0.0.1'
+  port = VIM::evaluate("s:relay_port")
   message = VIM::evaluate("a:message").gsub("\\\"", '"')
   begin
     a = TCPSocket.open(host, port)
@@ -187,7 +189,7 @@ RUBY
       let script .= "attempts = 0; "
       let script .= "a = nil; "
       let script .= "begin; "
-      let script .=   "a = TCPSocket.open('" . s:hostname . "', " . s:debugger_port . "); "
+      let script .=   "a = TCPSocket.open('127.0.0.1', " . s:relay_port . "); "
       let script .=   "a.puts(%q[" . substitute(substitute(a:message, '[', '\[', 'g'), ']', '\]', 'g') . "]);"
       let script .=   "a.close; "
       let script .= "rescue Errno::ECONNREFUSED; "
@@ -196,7 +198,7 @@ RUBY
       let script .=     "sleep 0.05; "
       let script .=     "retry; "
       let script .=   "else; "
-      let script .=     "puts('" . s:hostname . ":" . s:debugger_port . " can not be opened'); "
+      let script .=     "puts('127.0.0.1':" . s:relay_port . " can not be opened'); "
       let script .=     "exit; "
       let script .=   "end; "
       let script .= "ensure; "

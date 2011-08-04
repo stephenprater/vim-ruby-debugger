@@ -8,7 +8,7 @@ let g:RubyDebugger.queue = s:Queue.new()
 " ruby script ('script/server webrick' by default)
 function! RubyDebugger.start(...) dict
   call s:log("Executing :Rdebugger...")
-  let g:RubyDebugger.server = s:Server.new(s:hostname, s:rdebug_port, s:debugger_port, s:runtime_dir, s:tmp_file, s:server_output_file)
+  let g:RubyDebugger.server = s:Server.new(s:hostname, s:rdebug_port, s:relay_port, s:runtime_dir, s:tmp_file, s:server_output_file)
   let script_string = a:0 && !empty(a:1) ? a:1 : g:ruby_debugger_default_script
   echo "Loading debugger..."
   call g:RubyDebugger.server.start(s:get_escaped_absolute_path(script_string))
@@ -35,13 +35,13 @@ function! RubyDebugger.connect(...) dict
   let server_port = server_params[1]
 
   let s:hostname = server_name
-  let s:debugger_port = server_port
+  let s:rdebug_port = server_port
 
   let g:RubyDebugger.remote = 1
   let g:RubyDebugger.remote_directory = a:2
   let g:RubyDebugger.local_directory = a:3
 
-  let g:RubyDebugger.server = s:Server.new_remote(s:hostname, s:debugger_port, g:RubyDebugger.remote_directory, g:RubyDebugger.local_directory, s:runtime_dir, s:tmp_file, s:server_output_file)
+  let g:RubyDebugger.server = s:Server.new_remote(s:hostname, s:rdebug_port, s:relay_port, s:runtime_dir, s:tmp_file, s:server_output_file)
   call g:RubyDebugger.server.connect()
 
   let g:RubyDebugger.exceptions = []
@@ -60,7 +60,7 @@ function! RubyDebugger.stop() dict
     call g:RubyDebugger.server.stop()
   elseif has_key(g:RubyDebugger, 'remote')
     let s:hostname = s:default_hostname
-    let s:debugger_port = s.default_debugger_port
+    let s:rdebug_port = s.default_debugger_port
     unlet g:RubyDebugger.remote
   endif
   let g:RubyDebugger.status = 'inactive'

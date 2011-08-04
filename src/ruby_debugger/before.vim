@@ -1,8 +1,12 @@
 " Init section - set default values, highlight colors
 
-let s:rdebug_port = 39767
-let s:default_debugger_port = 39768
-let s:debugger_port = s:default_debugger_port
+"this is the port that that rdebug-ide listens on
+let s:default_rdebug_port = 1234
+let s:rdebug_port = s:default_rdebug_port 
+
+"this is the port that ruby-debugger.rb listens on
+let s:relay_port = 39768
+
 " hostname() returns something strange in Windows (E98BD9A419BB41D), so set hostname explicitly
 let s:default_hostname = '127.0.0.1' "hostname()
 let s:hostname = s:default_hostname
