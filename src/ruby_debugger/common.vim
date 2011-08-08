@@ -238,7 +238,6 @@ function! s:clear_current_state()
 endfunction
 
 
-" Open given file and jump to given line
 " (stolen from NERDTree)
 function! s:jump_to_file(file, line)
   "if the file is already open in this tab then just stick the cursor in it

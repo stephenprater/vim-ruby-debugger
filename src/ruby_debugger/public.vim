@@ -21,12 +21,13 @@ function! RubyDebugger.start(...) dict
   echo "Debugger started"
   let g:RubyDebugger.status = 'local'
   call g:RubyDebugger.queue.execute()
+  doauto User RdbActivate
 endfunction
 
 "Connect to a remote debugger
 function! RubyDebugger.connect(...) dict
   if empty(a:1)
-    call g:RubyDebugger.start()
+    echoerr "Need <server>:<port> <remote dir> <local dir>"
   endif
   call s:log("Executing :Rdebugger Connect...")
   let server_params = split(a:1, ':')
@@ -46,41 +47,34 @@ function! RubyDebugger.connect(...) dict
 
   let g:RubyDebugger.exceptions = []
   for breakpoint in g:RubyDebugger.breakpoints
-    call g:RubyDebugger.queue.add(breakpoints.command())
+    call g:RubyDebugger.queue.add(breakpoint.command())
   endfor
   call g:RubyDebugger.queue.add('start')
   echo "Debugger connected!"
   let g:RubyDebugger.status = 'remote'
   call g:RubyDebugger.queue.execute()
+  doauto User RdbActivate
 endfunction
 
 " Stop running server.
 function! RubyDebugger.stop() dict
-  if has_key(g:RubyDebugger, 'server')
-    call g:RubyDebugger.server.stop()
-  elseif has_key(g:RubyDebugger, 'remote')
+  if has_key(g:RubyDebugger, 'remote')
     let s:hostname = s:default_hostname
-    let s:rdebug_port = s.default_debugger_port
+    let s:rdebug_port = s:default_rdebug_port
     unlet g:RubyDebugger.remote
   endif
+  call g:RubyDebugger.server.stop()
   let g:RubyDebugger.status = 'inactive'
+  doauto User RdbDeactivate
 endfunction
 
 "send interrupt to the server
 function! RubyDebugger.interrupt() dict
   if has_key(g:RubyDebugger,'remote') || has_key(g:RubyDebugger, 'server')  && g:RubyDebugger.server.is_running
     call g:RubyDebugger.queue.add('interrupt')
+    call g:RubyDebugger.queue.execute()
   endif
 endfunction
-
-"quit the remote program - there's no facility fo relaunching so you better be
-"sure!
-function! RubyDebugger.quit() dict
-  if has_key(g:RubyDebugger,'remote') || has_key(g:RubyDebugger, 'server')  && g:RubyDebugger.server.is_running
-    call g:RubyDebugger.queue.add('quit')
-  endif
-endfunction
-
 
 " This function receives commands from the debugger. When ruby_debugger.rb
 " gets output from rdebug-ide, it writes it to the special file and 'kick'
@@ -132,6 +126,34 @@ endfunction
 " other function in tests
 let RubyDebugger.send_command = function("<SID>send_message_to_debugger")
 
+function! RubyDebugger.set_mappings() dict
+  noremap <leader>s :RdbStep<CR>
+  noremap <leader>f :RdbFinish<CR>
+  noremap <leader>n :RdbNext<CR> 
+  noremap <leader>c :RdbContinue<CR> 
+  noremap <leader>e :RdbEval<Space>
+endfunction
+
+function! RubyDebugger.unset_mappings() dict
+  nunmap <leader>s
+  nunmap <leader>f
+  nunmap <leader>n
+  nunmap <leader>c
+  nunmap <leader>e
+endfunction
+
+function! RubyDebugger.debugger_workspace() dict
+  if !(s:variables_window.is_open())
+    call s:variables_window.open()
+  endif
+  if !(s:frames_window.is_open())
+    call s:frames_window.open()
+  endif
+  if !(s:breakpoints_window.is_open())
+    call s:breakpoints_window.open()
+  endif
+endfunction
+
 
 " Open variables window
 function! RubyDebugger.open_variables() dict
@@ -156,6 +178,11 @@ function! RubyDebugger.open_frames() dict
   call g:RubyDebugger.queue.execute()
 endfunction
 
+"Order the debugger to reload the file
+function! RubyDebugger.reload_file(file) dict
+  let remote_file = s:rewrite_filename(a:file,'r')
+  call g:RubyDebugger.eval("load '" . remote_file . "'")
+endfunction
 
 " Set/remove breakpoint at current position. If argument
 " is given, it will set conditional breakpoint (argument is condition)
@@ -286,9 +313,15 @@ endfunction
 
 " Exit
 function! RubyDebugger.exit() dict
+  if has_key(g:RubyDebugger,'remote')
+    if(!confirm("Quit remote program? (Use :RdbStop to disconnect without killing the remote)", "&Yes\n&No", 1))
+      return 0
+    endif
+  endif
   call g:RubyDebugger.queue.add("exit")
   call s:clear_current_state()
   call g:RubyDebugger.queue.execute()
+  call g:RubyDebugger.stop()
 endfunction
 
 

@@ -6,7 +6,7 @@
 " Jump to file/line where execution was suspended, set current line sign and get local variables
 function! RubyDebugger.commands.jump_to_breakpoint(cmd) dict
   let attrs = s:get_tag_attributes(a:cmd) 
-  call s:jump_to_file(s:rewrite_filname(attrs.file,'l'), attrs.line)
+  call s:jump_to_file(s:rewrite_filename(attrs.file,'l'), attrs.line)
   call s:log("Jumped to breakpoint " . attrs.file . ":" . attrs.line)
 
   if has("signs")

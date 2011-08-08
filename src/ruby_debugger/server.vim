@@ -50,9 +50,9 @@ function! s:Server.connect() dict
   endif
 
   call s:log("Now we need to store PIDs of ruby_debugger, retrieving it: ")
+  let self.rdebug_pid = 'remote'
   let self.debugger_pid = self._get_pid(self.relay_port, 1)
-  call s:log("Server PIDs is ruby_debugger.rb: " . self.debugger_pid)
-
+  call s:log("Server PIDs is ruby_debugger.rb: " . self.debugger_pid . "rdebug-ide is remote")
   call s:log("Debugger is successfully started")
 endfunction
 
@@ -117,14 +117,14 @@ function! s:Server.is_running() dict
   if (self._get_pid(self.relay_port, 0) =~ '^\d\+$')
     if !has_key(self,'remote')
       if (self._get_pid(self.rdebug_port, 0) =~ '^\d\+$') 
-        return true
+        return 1
       endif
     endif
     if has_key(self,'remote')
-      return true
+      return 1
     endif
   endif
-  return false
+  return 0
 endfunction
 
 
@@ -132,7 +132,7 @@ endfunction
 "
 
 
-" Get PID of process, that listens given port on given host. If must_get_pid
+" Get PID of process, that listens given port on given host. If:help  must_get_pid
 " parameter is true, it will try to get PID for 10 seconds.
 function! s:Server._get_pid(port, must_get_pid)
   call s:log("Trying to find PID of process on " . a:port . " port, must_get_pid = " . a:must_get_pid)
