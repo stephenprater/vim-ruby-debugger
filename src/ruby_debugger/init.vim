@@ -18,7 +18,7 @@ function! ruby_debugger#activate()
   call g:RubyDebugger.set_mappings()
   augroup RdbActivated
     autocmd!
-    autocmd BufWritePost *.rb call g:RubyDebugger.reload_file(expand('<afile>'))
+    autocmd BufWritePost *.rb call g:RubyDebugger.reload_file(expand('<afile>:p'))
   augroup END
 endfunction
 
