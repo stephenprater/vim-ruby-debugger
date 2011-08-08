@@ -1735,7 +1735,7 @@ function! s:Logger.put(string) dict
   if g:ruby_debugger_debug_mode
     let string = 'Vim plugin, ' . strftime("%H:%M:%S") . ': ' . a:string
     execute('set verbosefile=' . g:RubyDebugger.logger.file)
-    silent verbose echo string
+    silent verbose echo substitute(string,'/^\s*/','',"") 
     execute('set verbosefile=""')
   endif
 endfunction
@@ -2091,14 +2091,14 @@ function! s:Server.is_running() dict
   if (self._get_pid(self.relay_port, 0) =~ '^\d\+$')
     if !has_key(self,'remote')
       if (self._get_pid(self.rdebug_port, 0) =~ '^\d\+$') 
-        return true
+        return 1
       endif
     endif
     if has_key(self,'remote')
-      return true
+      return 1
     endif
   endif
-  return false
+  return 0
 endfunction
 
 
