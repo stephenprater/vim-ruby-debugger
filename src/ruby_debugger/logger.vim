@@ -16,7 +16,7 @@ function! s:Logger.put(string) dict
   if g:ruby_debugger_debug_mode
     let string = 'Vim plugin, ' . strftime("%H:%M:%S") . ': ' . a:string
     execute('set verbosefile=' . g:RubyDebugger.logger.file)
-    silent verbose echo string
+    silent verbose echo substitute(string,'/^\s*/','',"") 
     execute('set verbosefile=""')
   endif
 endfunction
