@@ -61,6 +61,42 @@ function! RubyDebugger.commands.set_breakpoint(cmd)
   call g:RubyDebugger.queue.execute()
 endfunction
 
+function! RubyDebugger.commands.execute_watches(cmd)
+  for watch in g:RubyDebugger.watches 
+    g:RubyDebugger.queue.add('var inspect ' . watch)
+  endfor
+
+  "send all the watch requests at the same time, one at a time
+  g:RubyDebugger.queue.execute()
+endfunction
+
+function! RubyDebugger.commands.display_watch_result(list_of_variables)
+  let list_of_variables = a:list_of_variables 
+
+  if g:RubyDebugger.watch_results == {}
+    let g:RubyDebugger.watch_results = s:VarParent.new({'hasChildren': 'true'})
+    let g:RubyDebugger.watch_results.is_open = 1
+    let g:RubyDebugger.watch_results.children = []
+  endif
+
+  if length(list_of_variables) == 1
+    call s:log("Got initial inspection result")
+    call g:RubyDebugger.watches.add_childs(list_of_variables[0])
+    if s:watches_window_is_open()
+      call s:watches_window.open()
+    endif
+  elseif has_key(g:RubyDebugger, 'current_watch')
+    let variable = g:RubyDebugger.current_watch
+    if variable != {}
+      call variable.add_childs(list_of_variables)
+      call s:log("Got results for further inspection of " . variable.attributes.objectId)
+      call s:watches_window.open()
+    else
+      call s:log("Attempted to inspect an unknown variable")
+    endif
+    unlet g:RubyDebugger.current_watch
+  endif
+endfunction
 
 " <variables>
 "   <variable name="array" kind="local" value="Array (2 element(s))" type="Array" hasChildren="true" objectId="-0x2418a904"/>
@@ -74,8 +110,19 @@ function! RubyDebugger.commands.set_variables(cmd)
   for tag in tags
     let attrs = s:get_tag_attributes(tag)
     let variable = s:Var.new(attrs)
+    if variable.attributes.name == "eval_result" 
+      call s:log("Got intial inspect result")
+      call add(list_of_variables, variable)
+      call g:RubyDebugger.commands.display_watch_result(list_of_variables)
+      return
+    endif
     call add(list_of_variables, variable)
   endfor
+
+  if has_key(g:RubyDebugger, 'current_watch')
+    call g:RubyDebugger.commands.display_watch_result(list_of_variables)
+    return
+  endif
 
   " If there is no variables, create unnamed root variable. Local variables
   " will be chilren of this variable
@@ -164,8 +211,20 @@ function! RubyDebugger.commands.error(cmd)
   let error_match = s:get_inner_tags(a:cmd) 
   if !empty(error_match)
     let error = error_match[1]
-    echo "RubyDebugger Error: " . error
-    call s:log("Got error: " . error)
+    if error =~ '/There is no thread suspended/'
+      " find bad command
+      let error_cmd = matchstr(error,"/'.*")
+      let error_cmd = strpart(error_cmd,1,strlen(error_cmd)-1)
+      if g:RubyDebugger.interrupt_queue.is_empty()
+        call g:RubyDebugger.queue.add('interrupt')
+        call g:RubyDebugger.queue.execute()
+      endif
+      g:RubyDebugger.interrupt_queue.add(error_add)
+      echo "Couldn't execute : " . error_cmd . " so saving for later."
+    else
+      echo "RubyDebugger Error: " . error
+      call s:log("Got error: " . error)
+    endif
   endif
 endfunction
 
@@ -177,11 +236,12 @@ function! RubyDebugger.commands.message(cmd)
   if !empty(message_match)
     let message = message_match[1]
     echo "RubyDebugger Message: " . message
+    if message == "finished"
+      call g:RubyDebugger.stop()
+    endif
     call s:log("Got message: " . message)
   endif
 endfunction
 
-
 " *** End of debugger Commands 
-
 

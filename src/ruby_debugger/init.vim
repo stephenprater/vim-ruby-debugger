@@ -14,7 +14,7 @@ augroup vim_ruby_debugger
 augroup END
 
 function! ruby_debugger#activate() 
-  call g:RubyDebugger.debugger_workspace()
+  call g:RubyDebugger.debugger_workspace('open')
   call g:RubyDebugger.set_mappings()
   augroup RdbActivated
     autocmd!
@@ -23,6 +23,7 @@ function! ruby_debugger#activate()
 endfunction
 
 function! ruby_debugger#deactivate() 
+  call g:RubyDebugger.debugger_workspace('close')
   call g:RubyDebugger.unset_mappings()
   autocmd! RdbActivated
 endfunction

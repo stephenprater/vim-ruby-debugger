@@ -2,6 +2,9 @@
 
 let RubyDebugger = { 'commands': {}, 'variables': {}, 'settings': {}, 'breakpoints': [], 'frames': [], 'exceptions': [], 'status': 'inactive'}
 let g:RubyDebugger.queue = s:Queue.new()
+" this queue lets us give it things to do as soon as there's a thread to
+" execute them in
+let g:RubyDebugger.interrupt_queue = s:Queue.new()
 
 
 " Run debugger server. It takes one optional argument with path to debugged
@@ -129,8 +132,8 @@ let RubyDebugger.send_command = function("<SID>send_message_to_debugger")
 function! RubyDebugger.set_mappings() dict
   noremap <leader>s :RdbStep<CR>
   noremap <leader>f :RdbFinish<CR>
-  noremap <leader>n :RdbNext<CR> 
-  noremap <leader>c :RdbContinue<CR> 
+  noremap <leader>n :RdbNext<CR>
+  noremap <leader>c :RdbContinue<CR>
   noremap <leader>e :RdbEval<Space>
 endfunction
 
@@ -142,15 +145,27 @@ function! RubyDebugger.unset_mappings() dict
   nunmap <leader>e
 endfunction
 
-function! RubyDebugger.debugger_workspace() dict
-  if !(s:variables_window.is_open())
-    call s:variables_window.open()
-  endif
-  if !(s:frames_window.is_open())
-    call s:frames_window.open()
-  endif
-  if !(s:breakpoints_window.is_open())
-    call s:breakpoints_window.open()
+function! RubyDebugger.debugger_workspace(op) dict
+  if (a:op == 'open')
+    if !(s:variables_window.is_open())
+      call s:variables_window.open()
+    endif
+    if !(s:frames_window.is_open())
+      call s:frames_window.open()
+    endif
+    if !(s:breakpoints_window.is_open())
+      call s:breakpoints_window.open()
+    endif
+  elseif (a:op == 'close')
+    if s:variables_window.is_open()
+      call s:variables_window.close()
+    endif
+    if s:frames_window.is_open()
+      call s:frames_window.close()
+    endif
+    if s:breakpoints_window.is_open()
+      call s:breakpoints_window.close()
+    endif
   endif
 endfunction
 
@@ -181,7 +196,8 @@ endfunction
 "Order the debugger to reload the file
 function! RubyDebugger.reload_file(file) dict
   let remote_file = s:rewrite_filename(a:file,'r')
-  call g:RubyDebugger.eval("load '" . remote_file . "'")
+  call g:RubyDebugger.queue.add("load " . remote_file)
+  call g:RubyDebugger.queue.execute()
 endfunction
 
 " Set/remove breakpoint at current position. If argument

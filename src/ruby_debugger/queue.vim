@@ -42,6 +42,13 @@ function! s:Queue.empty() dict
   let self.queue = []
 endfunction
 
+function! s:Queue.is_empty() dict
+  if len(self.queue) == 0
+    return 1
+  else
+    return 0
+  endif
+endfunction
 
 " *** Queue class (end)
 
