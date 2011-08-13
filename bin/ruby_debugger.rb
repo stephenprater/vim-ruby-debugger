@@ -169,7 +169,7 @@ class VimRubyDebugger
       if @params[:debug_mode] == '1'
         File.open(@params[:logger_file], 'a') do |f|
           # match vim redir style new lines, rather than trailing 
-          f << "\nRuby_debugger.rb, #{Time.now.strftime("%H:%M:%S")} : #{string}" 
+          f << "\nRuby_debugger.rb, #{Time.now.strftime("%H:%M:%S")} : #{string.chomp}" 
         end
       end
     end

@@ -184,11 +184,28 @@ function! RubyDebugger.unset_mappings() dict
   nunmap <leader>e
 endfunction
 
-function! RubyDebugger.debugger_workspace() dict
-  call s:variables_window.toggle()
-  call s:frames_window.toggle()
-  call s:breakpoints_window.toggle()
-  call s:watches_window.toggle()
+function! RubyDebugger.debugger_workspace(op) dict
+  if (a:op == 'open')
+    if !(s:variables_window.is_open())
+      call s:variables_window.open()
+    endif
+    if !(s:frames_window.is_open())
+      call s:frames_window.open()
+    endif
+    if !(s:breakpoints_window.is_open())
+      call s:breakpoints_window.open()
+    endif
+  elseif (a:op == 'close')
+    if s:variables_window.is_open()
+      call s:variables_window.close()
+    endif
+    if s:frames_window.is_open()
+      call s:frames_window.close()
+    endif
+    if s:breakpoints_window.is_open()
+      call s:breakpoints_window.close()
+    endif
+  endif
 endfunction
 
 
