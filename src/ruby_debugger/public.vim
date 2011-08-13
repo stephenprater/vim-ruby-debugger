@@ -1,10 +1,27 @@
 " *** Public interface (start)
 
-let RubyDebugger = { 'commands': {}, 'variables': {}, 'settings': {}, 'breakpoints': [], 'frames': [], 'exceptions': [], 'status': 'inactive'}
+let RubyDebugger = { 
+    \ 'commands': {}, 
+    \ 'variables': {}, 
+    \ 'settings': {},
+    \ 'watch_results': [], 
+    \ 'breakpoints': [], 
+    \ 'frames': [], 
+    \ 'exceptions': [],
+    \ 'status': 'inactive'
+  \}
+
 let g:RubyDebugger.queue = s:Queue.new()
+
 " this queue lets us give it things to do as soon as there's a thread to
-" execute them in
+" execute them in, particularly loading files
 let g:RubyDebugger.interrupt_queue = s:Queue.new()
+
+" this queue is for watches - we can only send one watch at a time
+" to the server because the response is async.  however,
+" the debugger itself is single threaded, so you can count
+" on them coming back in the same order they left in
+let g:RubyDebugger.watch_queue = s:Queue.new()
 
 
 " Run debugger server. It takes one optional argument with path to debugged
@@ -73,10 +90,24 @@ endfunction
 
 "send interrupt to the server
 function! RubyDebugger.interrupt() dict
+  call s:log("Will send interrupt if program is running")
   if has_key(g:RubyDebugger,'remote') || has_key(g:RubyDebugger, 'server')  && g:RubyDebugger.server.is_running
     call g:RubyDebugger.queue.add('interrupt')
     call g:RubyDebugger.queue.execute()
   endif
+endfunction
+
+function! RubyDebugger.watch(expr) dict
+  call s:log("Adding watch expression '" . a:expr . "'")
+  let watch_expression = s:WatchExpression.new(a:expr)
+  call g:RubyDebugger.watch_queue.add(watch_expression)
+  call add(g:RubyDebugger.watch_results, watch_expression) 
+  if s:watches_window.is_open()
+    call s:watches_window.open()
+    exe "wincmd p"
+  endif
+  call s:log("Executing watches")
+  call g:RubyDebugger.commands.execute_watches(1)
 endfunction
 
 " This function receives commands from the debugger. When ruby_debugger.rb
@@ -89,20 +120,25 @@ function! RubyDebugger.receive_command() dict
   let file_contents = join(readfile(s:tmp_file), "")
   call s:log("Received command: " . file_contents)
   let commands = split(file_contents, s:separator)
+  let watch_trigger = 0
   for cmd in commands
     if !empty(cmd)
       if match(cmd, '<breakpoint ') != -1
         call g:RubyDebugger.commands.jump_to_breakpoint(cmd)
+        let watch_trigger = 1
       elseif match(cmd, '<suspended ') != -1
         call g:RubyDebugger.commands.jump_to_breakpoint(cmd)
+        let watch_trigger = 1
       elseif match(cmd, '<exception ') != -1
         call g:RubyDebugger.commands.handle_exception(cmd)
+        let watch_trigger = 1
       elseif match(cmd, '<breakpointAdded ') != -1
         call g:RubyDebugger.commands.set_breakpoint(cmd)
       elseif match(cmd, '<catchpointSet ') != -1
         call g:RubyDebugger.commands.set_exception(cmd)
       elseif match(cmd, '<variables>') != -1
         call g:RubyDebugger.commands.set_variables(cmd)
+        call s:log("returning from variables")
       elseif match(cmd, '<error>') != -1
         call g:RubyDebugger.commands.error(cmd)
       elseif match(cmd, '<message>') != -1
@@ -116,7 +152,10 @@ function! RubyDebugger.receive_command() dict
       endif
     endif
   endfor
-  call g:RubyDebugger.queue.after_hook()
+  if watch_trigger && !g:RubyDebugger.watch_queue.is_empty()
+    call s:log("Executing watches by filling from watch_queue")
+    call g:RubyDebugger.commands.execute_watches(1)
+  end
   call g:RubyDebugger.queue.execute()
 endfunction
 
@@ -145,28 +184,11 @@ function! RubyDebugger.unset_mappings() dict
   nunmap <leader>e
 endfunction
 
-function! RubyDebugger.debugger_workspace(op) dict
-  if (a:op == 'open')
-    if !(s:variables_window.is_open())
-      call s:variables_window.open()
-    endif
-    if !(s:frames_window.is_open())
-      call s:frames_window.open()
-    endif
-    if !(s:breakpoints_window.is_open())
-      call s:breakpoints_window.open()
-    endif
-  elseif (a:op == 'close')
-    if s:variables_window.is_open()
-      call s:variables_window.close()
-    endif
-    if s:frames_window.is_open()
-      call s:frames_window.close()
-    endif
-    if s:breakpoints_window.is_open()
-      call s:breakpoints_window.close()
-    endif
-  endif
+function! RubyDebugger.debugger_workspace() dict
+  call s:variables_window.toggle()
+  call s:frames_window.toggle()
+  call s:breakpoints_window.toggle()
+  call s:watches_window.toggle()
 endfunction
 
 
@@ -185,6 +207,12 @@ function! RubyDebugger.open_breakpoints() dict
   call g:RubyDebugger.queue.execute()
 endfunction
 
+"Open Watches
+function! RubyDebugger.open_watches() dict
+  call s:watches_window.toggle()
+  call s:log("Opened watches window")
+  call g:RubyDebugger.queue.execute()
+endfunction
 
 " Open frames window
 function! RubyDebugger.open_frames() dict

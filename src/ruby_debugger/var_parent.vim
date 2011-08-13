@@ -18,6 +18,8 @@ function! s:VarParent.new(attrs)
   let new_variable.level = 0
   let new_variable.children = []
   let new_variable.type = "VarParent"
+  let new_variable.current = "current_variable"
+  let new_variable.window = s:variables_window
   let s:Var.id += 1
   let new_variable.id = s:Var.id
   return new_variable
@@ -35,9 +37,9 @@ endfunction
 " Close variable and display it
 function! s:VarParent.close()
   let self.is_open = 0
-  call s:variables_window.display()
-  if has_key(g:RubyDebugger, "current_variable")
-    unlet g:RubyDebugger.current_variable
+  call self.window.display()
+  if has_key(g:RubyDebugger, self.current)
+    unlet g:RubyDebugger[self.current]
   endif
   return 0
 endfunction
@@ -110,7 +112,7 @@ function! s:VarParent._init_children()
 
   " Get children
   if has_key(self.attributes, 'objectId')
-    let g:RubyDebugger.current_variable = self
+    let g:RubyDebugger[self.current] = self
     call g:RubyDebugger.queue.add('var instance ' . self.attributes.objectId)
   endif
 

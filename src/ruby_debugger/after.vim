@@ -31,6 +31,7 @@ endif
 let s:variables_window = s:WindowVariables.new("variables", "Variables_Window")
 let s:breakpoints_window = s:WindowBreakpoints.new("breakpoints", "Breakpoints_Window")
 let s:frames_window = s:WindowFrames.new("frames", "Backtrace_Window")
+let s:watches_window = s:WindowWatches.new("watches", "Watches_Window")
 
 " Init logger. The plugin logs all its actions. If you have some troubles,
 " this file can help

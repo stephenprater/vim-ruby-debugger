@@ -21,6 +21,7 @@ function! s:Queue.execute() dict
     call self.empty()
     call g:RubyDebugger.send_command(message)
   endif
+  call s:log("the queue was empty")  
 endfunction
 
 
@@ -31,9 +32,15 @@ function! s:Queue.after_hook() dict
   endif
 endfunction
 
+" remove the first item off the queue 
+function! s:Queue.unshift() dict
+  let element = remove(self.queue,0)
+  call s:log("Popping " . string(element) . " off queue.")
+  return element
+endfunction
 
 function! s:Queue.add(element) dict
-  call s:log("Adding '" . a:element . "' to queue")
+  call s:log("Adding '" . string(a:element) . "' to queue")
   call add(self.queue, a:element)
 endfunction
 
@@ -43,7 +50,7 @@ function! s:Queue.empty() dict
 endfunction
 
 function! s:Queue.is_empty() dict
-  if len(self.queue) == 0
+  if empty(self.queue)
     return 1
   else
     return 0
@@ -51,6 +58,3 @@ function! s:Queue.is_empty() dict
 endfunction
 
 " *** Queue class (end)
-
-
-

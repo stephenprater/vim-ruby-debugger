@@ -340,6 +340,7 @@ function! s:jump_to_file(file, line)
     exe "edit " . a:file
   endif
   exe "normal " . a:line . "G"
+  exe "normal zz" 
 endfunction
 
 
@@ -394,7 +395,6 @@ function! s:buf_in_windows(buffer_number)
   return count
 endfunction 
 
-
 " Find first 'normal' window (not quickfix, explorer, etc)
 function! s:first_normal_window()
   let i = 1
@@ -431,6 +431,7 @@ function! s:Queue.execute() dict
     call self.empty()
     call g:RubyDebugger.send_command(message)
   endif
+  call s:log("the queue was empty")  
 endfunction
 
 
@@ -441,9 +442,15 @@ function! s:Queue.after_hook() dict
   endif
 endfunction
 
+" remove the first item off the queue 
+function! s:Queue.unshift() dict
+  let element = remove(self.queue,0)
+  call s:log("Popping " . string(element) . " off queue.")
+  return element
+endfunction
 
 function! s:Queue.add(element) dict
-  call s:log("Adding '" . a:element . "' to queue")
+  call s:log("Adding '" . string(a:element) . "' to queue")
   call add(self.queue, a:element)
 endfunction
 
@@ -453,7 +460,7 @@ function! s:Queue.empty() dict
 endfunction
 
 function! s:Queue.is_empty() dict
-  if len(self.queue) == 0
+  if empty(self.queue)
     return 1
   else
     return 0
@@ -462,16 +469,30 @@ endfunction
 
 " *** Queue class (end)
 
-
-
-
 " *** Public interface (start)
 
-let RubyDebugger = { 'commands': {}, 'variables': {}, 'settings': {}, 'breakpoints': [], 'frames': [], 'exceptions': [], 'status': 'inactive'}
+let RubyDebugger = { 
+    \ 'commands': {}, 
+    \ 'variables': {}, 
+    \ 'settings': {},
+    \ 'watch_results': [], 
+    \ 'breakpoints': [], 
+    \ 'frames': [], 
+    \ 'exceptions': [],
+    \ 'status': 'inactive'
+  \}
+
 let g:RubyDebugger.queue = s:Queue.new()
+
 " this queue lets us give it things to do as soon as there's a thread to
-" execute them in
+" execute them in, particularly loading files
 let g:RubyDebugger.interrupt_queue = s:Queue.new()
+
+" this queue is for watches - we can only send one watch at a time
+" to the server because the response is async.  however,
+" the debugger itself is single threaded, so you can count
+" on them coming back in the same order they left in
+let g:RubyDebugger.watch_queue = s:Queue.new()
 
 
 " Run debugger server. It takes one optional argument with path to debugged
@@ -540,10 +561,24 @@ endfunction
 
 "send interrupt to the server
 function! RubyDebugger.interrupt() dict
+  call s:log("Will send interrupt if program is running")
   if has_key(g:RubyDebugger,'remote') || has_key(g:RubyDebugger, 'server')  && g:RubyDebugger.server.is_running
     call g:RubyDebugger.queue.add('interrupt')
     call g:RubyDebugger.queue.execute()
   endif
+endfunction
+
+function! RubyDebugger.watch(expr) dict
+  call s:log("Adding watch expression '" . a:expr . "'")
+  let watch_expression = s:WatchExpression.new(a:expr)
+  call g:RubyDebugger.watch_queue.add(watch_expression)
+  call add(g:RubyDebugger.watch_results, watch_expression) 
+  if s:watches_window.is_open()
+    call s:watches_window.open()
+    exe "wincmd p"
+  endif
+  call s:log("Executing watches")
+  call g:RubyDebugger.commands.execute_watches(1)
 endfunction
 
 " This function receives commands from the debugger. When ruby_debugger.rb
@@ -556,20 +591,25 @@ function! RubyDebugger.receive_command() dict
   let file_contents = join(readfile(s:tmp_file), "")
   call s:log("Received command: " . file_contents)
   let commands = split(file_contents, s:separator)
+  let watch_trigger = 0
   for cmd in commands
     if !empty(cmd)
       if match(cmd, '<breakpoint ') != -1
         call g:RubyDebugger.commands.jump_to_breakpoint(cmd)
+        let watch_trigger = 1
       elseif match(cmd, '<suspended ') != -1
         call g:RubyDebugger.commands.jump_to_breakpoint(cmd)
+        let watch_trigger = 1
       elseif match(cmd, '<exception ') != -1
         call g:RubyDebugger.commands.handle_exception(cmd)
+        let watch_trigger = 1
       elseif match(cmd, '<breakpointAdded ') != -1
         call g:RubyDebugger.commands.set_breakpoint(cmd)
       elseif match(cmd, '<catchpointSet ') != -1
         call g:RubyDebugger.commands.set_exception(cmd)
       elseif match(cmd, '<variables>') != -1
         call g:RubyDebugger.commands.set_variables(cmd)
+        call s:log("returning from variables")
       elseif match(cmd, '<error>') != -1
         call g:RubyDebugger.commands.error(cmd)
       elseif match(cmd, '<message>') != -1
@@ -583,7 +623,10 @@ function! RubyDebugger.receive_command() dict
       endif
     endif
   endfor
-  call g:RubyDebugger.queue.after_hook()
+  if watch_trigger && !g:RubyDebugger.watch_queue.is_empty()
+    call s:log("Executing watches by filling from watch_queue")
+    call g:RubyDebugger.commands.execute_watches(1)
+  end
   call g:RubyDebugger.queue.execute()
 endfunction
 
@@ -612,28 +655,11 @@ function! RubyDebugger.unset_mappings() dict
   nunmap <leader>e
 endfunction
 
-function! RubyDebugger.debugger_workspace(op) dict
-  if (a:op == 'open')
-    if !(s:variables_window.is_open())
-      call s:variables_window.open()
-    endif
-    if !(s:frames_window.is_open())
-      call s:frames_window.open()
-    endif
-    if !(s:breakpoints_window.is_open())
-      call s:breakpoints_window.open()
-    endif
-  elseif (a:op == 'close')
-    if s:variables_window.is_open()
-      call s:variables_window.close()
-    endif
-    if s:frames_window.is_open()
-      call s:frames_window.close()
-    endif
-    if s:breakpoints_window.is_open()
-      call s:breakpoints_window.close()
-    endif
-  endif
+function! RubyDebugger.debugger_workspace() dict
+  call s:variables_window.toggle()
+  call s:frames_window.toggle()
+  call s:breakpoints_window.toggle()
+  call s:watches_window.toggle()
 endfunction
 
 
@@ -652,6 +678,12 @@ function! RubyDebugger.open_breakpoints() dict
   call g:RubyDebugger.queue.execute()
 endfunction
 
+"Open Watches
+function! RubyDebugger.open_watches() dict
+  call s:watches_window.toggle()
+  call s:log("Opened watches window")
+  call g:RubyDebugger.queue.execute()
+endfunction
 
 " Open frames window
 function! RubyDebugger.open_frames() dict
@@ -849,7 +881,6 @@ function! RubyDebugger.commands.jump_to_breakpoint(cmd) dict
   let attrs = s:get_tag_attributes(a:cmd) 
   call s:jump_to_file(s:rewrite_filename(attrs.file,'l'), attrs.line)
   call s:log("Jumped to breakpoint " . attrs.file . ":" . attrs.line)
-
   if has("signs")
     exe ":sign place " . s:current_line_sign_id . " line=" . attrs.line . " name=current_line file=" . s:rewrite_filename(attrs.file,'l')
   endif
@@ -902,35 +933,49 @@ function! RubyDebugger.commands.set_breakpoint(cmd)
   call g:RubyDebugger.queue.execute()
 endfunction
 
-function! RubyDebugger.commands.execute_watches(cmd)
-  for watch in g:RubyDebugger.watches 
-    g:RubyDebugger.queue.add('var inspect ' . watch)
-  endfor
-
-  "send all the watch requests at the same time, one at a time
-  g:RubyDebugger.queue.execute()
+function! RubyDebugger.commands.execute_watches(fill) dict
+  if !g:RubyDebugger.watch_queue.is_empty()
+    if a:fill
+      call s:log("Filling watch working queue with " . len(g:RubyDebugger.watch_queue.queue) . " watches")
+      let g:RubyDebugger.working_watch_queue = s:Queue.new()
+      let g:RubyDebugger.working_watch_queue.queue = copy(g:RubyDebugger.watch_queue.queue)
+    endif
+    if !g:RubyDebugger.working_watch_queue.is_empty()
+      let watch = g:RubyDebugger.working_watch_queue.unshift()
+      call s:log("Executing watch " . watch.id . " => ". watch.expr)
+      call g:RubyDebugger.queue.add('var inspect ' . watch.expr)
+      let g:RubyDebugger.watch_pending = watch
+      call g:RubyDebugger.queue.execute()
+    endif
+  endif
 endfunction
 
-function! RubyDebugger.commands.display_watch_result(list_of_variables)
-  let list_of_variables = a:list_of_variables 
+function! RubyDebugger.commands.display_watch_result(tags) dict
+  call s:log("Displaying watch result")
+  let list_of_results = [] 
 
-  if g:RubyDebugger.watch_results == {}
-    let g:RubyDebugger.watch_results = s:VarParent.new({'hasChildren': 'true'})
-    let g:RubyDebugger.watch_results.is_open = 1
-    let g:RubyDebugger.watch_results.children = []
-  endif
+  for tag in a:tags
+    let attrs = s:get_tag_attributes(tag)
+    let result = s:WatchResult.new(attrs)
+    call add(list_of_results, result)
+  endfor
 
-  if length(list_of_variables) == 1
-    call s:log("Got initial inspection result")
-    call g:RubyDebugger.watches.add_childs(list_of_variables[0])
-    if s:watches_window_is_open()
+  if has_key(g:RubyDebugger, 'watch_pending') 
+    let watch = g:RubyDebugger.watch_pending
+    call s:log("Got initial inspection result for watch " . watch.id . " = " . string(list_of_results[0]))
+    let watch.result = list_of_results[0]
+    let watch.result.attributes.name = watch.expr
+    if s:watches_window.is_open()
       call s:watches_window.open()
     endif
-  elseif has_key(g:RubyDebugger, 'current_watch')
-    let variable = g:RubyDebugger.current_watch
-    if variable != {}
-      call variable.add_childs(list_of_variables)
-      call s:log("Got results for further inspection of " . variable.attributes.objectId)
+    unlet g:RubyDebugger.watch_pending
+    call g:RubyDebugger.commands.execute_watches(0)
+  else
+    call s:log("Inspecting in current watch")
+    let watch = g:RubyDebugger.current_watch
+    if watch != {}
+      call watch.add_childs(list_of_results)
+      call s:log("Got results for further inspection of " . watch.attributes.objectId)
       call s:watches_window.open()
     else
       call s:log("Attempted to inspect an unknown variable")
@@ -944,26 +989,22 @@ endfunction
 " </variables>
 " Assign list of got variables to parent variable and (optionally) show them
 function! RubyDebugger.commands.set_variables(cmd)
+  call s:log("Recieved variables command with " . a:cmd)
   let tags = s:get_tags(a:cmd)
   let list_of_variables = []
+  
+  if has_key(g:RubyDebugger, 'current_watch') || has_key(g:RubyDebugger, 'watch_pending')
+    call g:RubyDebugger.commands.display_watch_result(tags)
+    call s:log("returned from watch interrupt")
+    return 0
+  endif
 
   " Create hash from list of tags
   for tag in tags
     let attrs = s:get_tag_attributes(tag)
     let variable = s:Var.new(attrs)
-    if variable.attributes.name == "eval_result" 
-      call s:log("Got intial inspect result")
-      call add(list_of_variables, variable)
-      call g:RubyDebugger.commands.display_watch_result(list_of_variables)
-      return
-    endif
     call add(list_of_variables, variable)
   endfor
-
-  if has_key(g:RubyDebugger, 'current_watch')
-    call g:RubyDebugger.commands.display_watch_result(list_of_variables)
-    return
-  endif
 
   " If there is no variables, create unnamed root variable. Local variables
   " will be chilren of this variable
@@ -1365,7 +1406,6 @@ function! s:WindowBreakpoints.bind_mappings()
   nnoremap <buffer> d :call <SID>window_breakpoints_delete_node()<cr>
 endfunction
 
-
 " Returns string that contains all breakpoints (for Window.display())
 function! s:WindowBreakpoints.render() dict
   let breakpoints = ""
@@ -1475,6 +1515,88 @@ endfunction
 " *** WindowFrames class (end)
 
 
+
+
+" *** WindowWatch class (start)
+" This is basically exactly like the variables window except it issue and
+" eval every time for the watch varaibles
+
+let s:WindowWatches = copy(s:Window)
+
+function! s:WindowWatches.render() dict
+  let watches = self.title . "\n"
+  let watch_queue = g:RubyDebugger.watch_queue.queue
+  for watch in watch_queue 
+    let watches .= watch.render()
+  endfor
+  return watches
+endfunction
+
+function! s:window_watches_delete_node()
+  let watch = s:WatchExpression.find_watch(s:WatchExpression.get_selected_expression())
+  if watch != {} 
+    call watch.delete()
+    call s:watches_window.open()
+  endif
+endfunction
+
+function! s:window_watches_eval_node()
+  echo "not implemented yet"
+endfunction
+
+function! s:window_watches_activate_node()
+  let watch = s:WatchExpression.get_selected()
+  if watch != {} && watch.type == "VarParent"
+    if watch.is_open
+      call watch.close()
+    else
+      call watch.open()
+    endif
+  endif
+  call g:RubyDebugger.queue.execute()
+endfunction
+
+function! s:WindowWatches.bind_mappings()
+  nnoremap <buffer> <2-leftmouse> :call <SID>window_watches_activate_node()<cr>
+  nnoremap <buffer> o :call <SID>window_watches_activate_node()<cr>
+  nnoremap <buffer> d :call <SID>window_watches_delete_node()<cr>
+  nnoremap <buffer> e :call <SID>window_watches_eval_node()<cr>
+endfunction
+
+function! s:WindowWatches.setup_syntax_highlighting()
+    execute "syn match rdebugTitle #" . self.title . "#"
+
+    syn match rdebugWatchId "^\d\+\s=>" 
+    
+    syn match rdebugPart #[| `]\+#
+    syn match rdebugPartFile #[| `]\+-# contains=rdebugPart nextgroup=rdebugChild contained
+    syn match rdebugChild #.\{-}\t# nextgroup=rdebugType contained
+
+    syn match rdebugClosable #[| `]\+\~# contains=rdebugPart nextgroup=rdebugParent contained
+    syn match rdebugOpenable #[| `]\++# contains=rdebugPart nextgroup=rdebugParent contained
+    syn match rdebugParent #.\{-}\t# nextgroup=rdebugType contained
+
+    syn match rdebugType #.\{-}\t# nextgroup=rdebugValue contained
+    syn match rdebugValue #.*\t#he=e-1 nextgroup=rdebugId contained
+    syn match rdebugId #.*# contained
+    
+    syn match rdebugParentLine '[| `]\+[+\~].*' contains=rdebugClosable,rdebugOpenable transparent
+    syn match rdebugChildLine '[| `]\+-.*' contains=rdebugPartFile transparent
+
+    hi def link rdebugWatchId Number
+    hi def link rdebugTitle Identifier
+    hi def link rdebugClosable Type
+    hi def link rdebugOpenable Title
+    hi def link rdebugPart Special
+    hi def link rdebugPartFile Type
+    hi def link rdebugChild Normal
+    hi def link rdebugParent Directory
+    hi def link rdebugType Type
+    hi def link rdebugValue Special
+    hi def link rdebugId Ignore
+endfunction
+
+" *** WindowWatches class (end)
 
 
 " *** Var proxy class (start)
@@ -1643,7 +1765,6 @@ function! s:VarChild._render(depth, draw_text, vertical_map, is_last_child)
 
     endif
   endif
-
   return output
 
 endfunction
@@ -1697,6 +1818,8 @@ function! s:VarParent.new(attrs)
   let new_variable.level = 0
   let new_variable.children = []
   let new_variable.type = "VarParent"
+  let new_variable.current = "current_variable"
+  let new_variable.window = s:variables_window
   let s:Var.id += 1
   let new_variable.id = s:Var.id
   return new_variable
@@ -1714,9 +1837,9 @@ endfunction
 " Close variable and display it
 function! s:VarParent.close()
   let self.is_open = 0
-  call s:variables_window.display()
-  if has_key(g:RubyDebugger, "current_variable")
-    unlet g:RubyDebugger.current_variable
+  call self.window.display()
+  if has_key(g:RubyDebugger, self.current)
+    unlet g:RubyDebugger[self.current]
   endif
   return 0
 endfunction
@@ -1789,7 +1912,7 @@ function! s:VarParent._init_children()
 
   " Get children
   if has_key(self.attributes, 'objectId')
-    let g:RubyDebugger.current_variable = self
+    let g:RubyDebugger[self.current] = self
     call g:RubyDebugger.queue.add('var instance ' . self.attributes.objectId)
   endif
 
@@ -1799,6 +1922,88 @@ endfunction
 " *** VarParent class (end)
 
 
+
+" *** Watch classes (start)
+
+let s:WatchExpression = { "id" : 0 }
+
+function! s:WatchExpression.new(expr)
+  let new_watch_expression = copy(self)
+  let new_watch_expression.expr = a:expr
+  let result = s:WatchResult.new({'hasChildren':'true'})
+  let new_watch_expression.result = copy(result)
+  let s:WatchExpression.id += 1
+  let new_watch_expression.id = s:WatchExpression.id
+  return new_watch_expression
+endfunction
+
+function! s:WatchExpression.delete()
+  call filter(g:RubyDebugger.watch_queue.queue, "v:val.id != " . self.id) 
+endfunction
+
+function! s:WatchExpression.render()
+  " in general, the root variable is not actually drawin - but draw
+  " these all since there are multiple roots
+  if has_key(self.result,'children')
+    let var_render = self.result._render(0,1,[],len(self.result.children) ==# 1)
+  else
+    let var_render = self.result._render(0,1,[],0)
+  endif
+  let lines = substitute(var_render, '\n\(.\)', '\n      \1','g')
+  let output = self.id . " => " . lines 
+  return output
+endfunction
+
+function! s:WatchExpression.find_watch(watch_id)
+  let root_watch = filter(copy(g:RubyDebugger.watch_queue.queue), "v:val.id == " . a:watch_id)
+  return root_watch[0]
+endfunction
+
+function! s:WatchExpression.get_selected_expression()
+  let linenum = line(".") 
+  while linenum > 0
+    let line = getline(linenum) 
+    let match = matchlist(line, '^\(\d\+\)\s=>') 
+    let watch_id = get(match, 1)
+    if watch_id
+      break
+    endif
+    let linenum -= 1
+  endwhile
+
+  if !watch_id
+    return 0 
+  endif
+  return watch_id
+endfunction
+
+function! s:WatchExpression.get_selected()
+  let watch_id = s:WatchExpression.get_selected_expression()
+  let var_match = matchlist(getline("."),'.*\t\(\d\+\)$')
+  let var_id = get(var_match,1)
+  if var_id
+    let watch = s:WatchExpression.find_watch(watch_id)
+    let variable = watch.result.find_variable({'id':var_id})
+    return variable
+  else
+    return {}
+  endif 
+endfunction
+
+" *** Watch class - this is exactly like a var execpt
+" it operates in a different window and useses
+" current_watch for inspection
+
+let s:WatchResult = copy(s:Var)
+
+function! s:WatchResult.new(attrs)
+  let new_watch = copy(s:Var.new(a:attrs))
+  let new_watch.current = "current_watch"
+  let new_watch.window = s:watches_window
+  return new_watch
+endfunction
+
+" *** Watch classes (end)
 
 " *** Logger class (start)
 
@@ -2311,6 +2516,7 @@ endif
 let s:variables_window = s:WindowVariables.new("variables", "Variables_Window")
 let s:breakpoints_window = s:WindowBreakpoints.new("breakpoints", "Breakpoints_Window")
 let s:frames_window = s:WindowFrames.new("frames", "Backtrace_Window")
+let s:watches_window = s:WindowWatches.new("watches", "Watches_Window")
 
 " Init logger. The plugin logs all its actions. If you have some troubles,
 " this file can help

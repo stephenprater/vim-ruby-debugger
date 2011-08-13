@@ -8,7 +8,6 @@ function! RubyDebugger.commands.jump_to_breakpoint(cmd) dict
   let attrs = s:get_tag_attributes(a:cmd) 
   call s:jump_to_file(s:rewrite_filename(attrs.file,'l'), attrs.line)
   call s:log("Jumped to breakpoint " . attrs.file . ":" . attrs.line)
-
   if has("signs")
     exe ":sign place " . s:current_line_sign_id . " line=" . attrs.line . " name=current_line file=" . s:rewrite_filename(attrs.file,'l')
   endif
@@ -61,35 +60,49 @@ function! RubyDebugger.commands.set_breakpoint(cmd)
   call g:RubyDebugger.queue.execute()
 endfunction
 
-function! RubyDebugger.commands.execute_watches(cmd)
-  for watch in g:RubyDebugger.watches 
-    g:RubyDebugger.queue.add('var inspect ' . watch)
-  endfor
-
-  "send all the watch requests at the same time, one at a time
-  g:RubyDebugger.queue.execute()
+function! RubyDebugger.commands.execute_watches(fill) dict
+  if !g:RubyDebugger.watch_queue.is_empty()
+    if a:fill
+      call s:log("Filling watch working queue with " . len(g:RubyDebugger.watch_queue.queue) . " watches")
+      let g:RubyDebugger.working_watch_queue = s:Queue.new()
+      let g:RubyDebugger.working_watch_queue.queue = copy(g:RubyDebugger.watch_queue.queue)
+    endif
+    if !g:RubyDebugger.working_watch_queue.is_empty()
+      let watch = g:RubyDebugger.working_watch_queue.unshift()
+      call s:log("Executing watch " . watch.id . " => ". watch.expr)
+      call g:RubyDebugger.queue.add('var inspect ' . watch.expr)
+      let g:RubyDebugger.watch_pending = watch
+      call g:RubyDebugger.queue.execute()
+    endif
+  endif
 endfunction
 
-function! RubyDebugger.commands.display_watch_result(list_of_variables)
-  let list_of_variables = a:list_of_variables 
+function! RubyDebugger.commands.display_watch_result(tags) dict
+  call s:log("Displaying watch result")
+  let list_of_results = [] 
 
-  if g:RubyDebugger.watch_results == {}
-    let g:RubyDebugger.watch_results = s:VarParent.new({'hasChildren': 'true'})
-    let g:RubyDebugger.watch_results.is_open = 1
-    let g:RubyDebugger.watch_results.children = []
-  endif
+  for tag in a:tags
+    let attrs = s:get_tag_attributes(tag)
+    let result = s:WatchResult.new(attrs)
+    call add(list_of_results, result)
+  endfor
 
-  if length(list_of_variables) == 1
-    call s:log("Got initial inspection result")
-    call g:RubyDebugger.watches.add_childs(list_of_variables[0])
-    if s:watches_window_is_open()
+  if has_key(g:RubyDebugger, 'watch_pending') 
+    let watch = g:RubyDebugger.watch_pending
+    call s:log("Got initial inspection result for watch " . watch.id . " = " . string(list_of_results[0]))
+    let watch.result = list_of_results[0]
+    let watch.result.attributes.name = watch.expr
+    if s:watches_window.is_open()
       call s:watches_window.open()
     endif
-  elseif has_key(g:RubyDebugger, 'current_watch')
-    let variable = g:RubyDebugger.current_watch
-    if variable != {}
-      call variable.add_childs(list_of_variables)
-      call s:log("Got results for further inspection of " . variable.attributes.objectId)
+    unlet g:RubyDebugger.watch_pending
+    call g:RubyDebugger.commands.execute_watches(0)
+  else
+    call s:log("Inspecting in current watch")
+    let watch = g:RubyDebugger.current_watch
+    if watch != {}
+      call watch.add_childs(list_of_results)
+      call s:log("Got results for further inspection of " . watch.attributes.objectId)
       call s:watches_window.open()
     else
       call s:log("Attempted to inspect an unknown variable")
@@ -103,26 +116,22 @@ endfunction
 " </variables>
 " Assign list of got variables to parent variable and (optionally) show them
 function! RubyDebugger.commands.set_variables(cmd)
+  call s:log("Recieved variables command with " . a:cmd)
   let tags = s:get_tags(a:cmd)
   let list_of_variables = []
+  
+  if has_key(g:RubyDebugger, 'current_watch') || has_key(g:RubyDebugger, 'watch_pending')
+    call g:RubyDebugger.commands.display_watch_result(tags)
+    call s:log("returned from watch interrupt")
+    return 0
+  endif
 
   " Create hash from list of tags
   for tag in tags
     let attrs = s:get_tag_attributes(tag)
     let variable = s:Var.new(attrs)
-    if variable.attributes.name == "eval_result" 
-      call s:log("Got intial inspect result")
-      call add(list_of_variables, variable)
-      call g:RubyDebugger.commands.display_watch_result(list_of_variables)
-      return
-    endif
     call add(list_of_variables, variable)
   endfor
-
-  if has_key(g:RubyDebugger, 'current_watch')
-    call g:RubyDebugger.commands.display_watch_result(list_of_variables)
-    return
-  endif
 
   " If there is no variables, create unnamed root variable. Local variables
   " will be chilren of this variable

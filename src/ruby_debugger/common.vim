@@ -256,6 +256,7 @@ function! s:jump_to_file(file, line)
     exe "edit " . a:file
   endif
   exe "normal " . a:line . "G"
+  exe "normal zz" 
 endfunction
 
 
@@ -309,7 +310,6 @@ function! s:buf_in_windows(buffer_number)
 
   return count
 endfunction 
-
 
 " Find first 'normal' window (not quickfix, explorer, etc)
 function! s:first_normal_window()
