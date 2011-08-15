@@ -195,6 +195,9 @@ function! RubyDebugger.debugger_workspace(op) dict
     if !(s:breakpoints_window.is_open())
       call s:breakpoints_window.open()
     endif
+    if !(s:watches_window.is_open())
+      call s:watches_window.open()
+    endif
   elseif (a:op == 'close')
     if s:variables_window.is_open()
       call s:variables_window.close()
@@ -204,6 +207,9 @@ function! RubyDebugger.debugger_workspace(op) dict
     endif
     if s:breakpoints_window.is_open()
       call s:breakpoints_window.close()
+    endif
+    if !(s:watches_window.is_open())
+      call s:watches_window.close()
     endif
   endif
 endfunction

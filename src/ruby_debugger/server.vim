@@ -160,10 +160,10 @@ function! s:Server._get_pid_attempt(port)
     "lsof is dog slow on the mac - just grep the process list 
     if a:port == s:relay_port
       call s:log("Trying to find ruby_debugger process") 
-      let cmd = "ps aux | grep 'ruby_debugger' | grep -v grep | head -n 1 | sed 's/ \{2,\}/ /g' | cut -f 2 -d ' '"
+      let cmd = "ps aux | grep 'ruby_debugger' | grep -v grep | head -n 1 | sed 's/ \\{2,\\}/ /g' | cut -f 2 -d ' '"
     elseif a:port == s:rdebug_port
       call s:log("Trying to find rdebug-ide process") 
-      let cmd = "ps aux | grep 'rdebug-ide' | grep -v grep | head -n 1 | sed 's/ \{2,\}/ /g' | cut -f 2 -d ' '" 
+      let cmd = "ps aux | grep 'rdebug-ide' | grep -v grep | head -n 1 | sed 's/ \\{2,\\}/ /g' | cut -f 2 -d ' '" 
     endif
     call s:log("Executing command: " . cmd)
     let pid = system(cmd)
