@@ -182,7 +182,14 @@ endfunction
 " <processingException type="SyntaxError" message="some message" />
 " Just show exception message
 function! RubyDebugger.commands.processing_exception(cmd)
-  let attrs = s:get_tag_attributes(a:cmd) 
+  let attrs = s:get_tag_attributes(a:cmd)
+  if attrs.type == "NameError" && has_key(g:RubyDebugger,'watch_pending')
+    call s:log("Recieved NameError during pending watch operation for watch " . g:RubyDebugger.watch_pending)
+    let watch = s:WatchExpression.find_watch(g:RubyDebugger.watch_pending)
+    let watch.result = "undefined (out of scope?)"
+    unlet g:RubyDebugger.watch_pending
+    return
+  endif
   let message = "RubyDebugger Exception, type: " . attrs.type . ", message: " . attrs.message
   echo message
   call s:log(message)

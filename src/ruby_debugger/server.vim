@@ -152,7 +152,7 @@ endfunction
 " unsuccessful
 function! s:Server._get_pid_attempt(port)
   if !exists("s:use_power_pc_detection") && has("macunix")
-    if match(system("arch"),"ppc") > 0
+    if match(system("arch"),"ppc") >= 0
       call s:log("Using a PowerPC, so we have to grep the process list.")
       let s:use_power_pc_detection = 1
     else

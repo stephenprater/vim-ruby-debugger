@@ -67,6 +67,8 @@ function! RubyDebugger.connect(...) dict
 
   let g:RubyDebugger.exceptions = []
   for breakpoint in g:RubyDebugger.breakpoints
+    " determine remote file for breakpoint set before our connection
+    let breakpoint.remote_file = s:rewrite_filename(breakpoint.file,'r')
     call g:RubyDebugger.queue.add(breakpoint.command())
   endfor
   call g:RubyDebugger.queue.add('start')
@@ -155,7 +157,7 @@ function! RubyDebugger.receive_command() dict
   if watch_trigger && !g:RubyDebugger.watch_queue.is_empty()
     call s:log("Executing watches by filling from watch_queue")
     call g:RubyDebugger.commands.execute_watches(1)
-  end
+  endif
   call g:RubyDebugger.queue.execute()
 endfunction
 

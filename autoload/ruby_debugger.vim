@@ -538,6 +538,8 @@ function! RubyDebugger.connect(...) dict
 
   let g:RubyDebugger.exceptions = []
   for breakpoint in g:RubyDebugger.breakpoints
+    " determine remote file for breakpoint set before our connection
+    let breakpoint.remote_file = s:rewrite_filename(breakpoint.file,'r')
     call g:RubyDebugger.queue.add(breakpoint.command())
   endfor
   call g:RubyDebugger.queue.add('start')
@@ -2448,13 +2450,22 @@ endfunction
 " Just try to get PID of process and return empty string if it was
 " unsuccessful
 function! s:Server._get_pid_attempt(port)
+  if !exists("s:use_power_pc_detection") && has("macunix")
+    if match(system("arch"),"ppc") >= 0
+      call s:log("Using a PowerPC, so we have to grep the process list.")
+      let s:use_power_pc_detection = 1
+    else
+      let s:use_power_pc_detection = 0
+    endif
+  endif
+
   if has("win32") || has("win64")
     call s:log("Trying to find listener of port " . a:port)
     let netstat = system("netstat -anop tcp")
     let pid_match = matchlist(netstat, ':' . a:port . '\s.\{-}LISTENING\s\+\(\d\+\)')
     let pid = len(pid_match) > 0 ? pid_match[1] : ""
-  elseif has("macunix")
-    "lsof is dog slow on the mac - just grep the process list 
+  elseif s:use_power_pc_detection 
+    "lsof is dog slow on ppc macs - just grep the process list 
     if a:port == s:relay_port
       call s:log("Trying to find ruby_debugger process") 
       let cmd = "ps aux | grep 'ruby_debugger' | grep -v grep | head -n 1 | sed 's/ \\{2,\\}/ /g' | cut -f 2 -d ' '"
