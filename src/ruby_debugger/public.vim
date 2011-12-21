@@ -210,7 +210,7 @@ function! RubyDebugger.debugger_workspace(op) dict
     if s:breakpoints_window.is_open()
       call s:breakpoints_window.close()
     endif
-    if !(s:watches_window.is_open())
+    if s:watches_window.is_open()
       call s:watches_window.close()
     endif
   endif
@@ -383,7 +383,10 @@ endfunction
 " Exit
 function! RubyDebugger.exit() dict
   if has_key(g:RubyDebugger,'remote')
-    if(!confirm("Quit remote program? (Use :RdbStop to disconnect without killing the remote)", "&Yes\n&No", 1))
+    let old_gui = set guioptions 
+    set guioptions += c
+    if(!confirm("Quit remote program? (Use :RdbStop to disconnect without killing the remote)", "&Yes\n&No", 0))
+      set guioptions = old_gui 
       return 0
     endif
   endif

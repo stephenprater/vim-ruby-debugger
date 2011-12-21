@@ -7,6 +7,7 @@ noremap <leader>dd :RdbDeleteBreakpoint<CR>
 noremap <leader>dv :RdbVariablesWindow<CR> 
 noremap <leader>dm :RdbBreakpointsWindow<CR> 
 noremap <leader>dt :RdbFramesWindow<CR>
+noremap <leader>dw :RdbWatchWindow<CR>
 
 augroup vim_ruby_debugger
   autocmd User RdbActivate call ruby_debugger#activate()
@@ -37,7 +38,8 @@ command! -nargs=0 RdbStep call g:RubyDebugger.step()
 command! -nargs=0 RdbFinish call g:RubyDebugger.finish()
 command! -nargs=0 RdbNext call g:RubyDebugger.next()
 command! -nargs=0 RdbContinue call g:RubyDebugger.continue()
-command! -nargs=0 RdbExit call g:RubyDebugger.exit()
+command! -nargs=0 RdbOpenWorkspace call g:RubyDebugger.debugger_workspace('open')
+command! -nargs=0 RdbCloseWorkspace call g:RubyDebugger.debugger_workspace('close')
 
 
 command! -nargs=* -complete=file Rdebugger call ruby_debugger#load_debugger() | call g:RubyDebugger.start(<q-args>) 

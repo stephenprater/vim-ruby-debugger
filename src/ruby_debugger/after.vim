@@ -39,5 +39,6 @@ let RubyDebugger.logger = s:Logger.new(s:logger_file)
 let s:variables_window.logger = RubyDebugger.logger
 let s:breakpoints_window.logger = RubyDebugger.logger
 let s:frames_window.logger = RubyDebugger.logger
+let s:watches_window.logger = RubyDebugger.logger
 
 " *** Creating instances (end)

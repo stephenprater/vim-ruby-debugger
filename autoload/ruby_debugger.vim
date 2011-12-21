@@ -628,7 +628,7 @@ function! RubyDebugger.receive_command() dict
   if watch_trigger && !g:RubyDebugger.watch_queue.is_empty()
     call s:log("Executing watches by filling from watch_queue")
     call g:RubyDebugger.commands.execute_watches(1)
-  end
+  endif
   call g:RubyDebugger.queue.execute()
 endfunction
 
@@ -681,7 +681,7 @@ function! RubyDebugger.debugger_workspace(op) dict
     if s:breakpoints_window.is_open()
       call s:breakpoints_window.close()
     endif
-    if !(s:watches_window.is_open())
+    if s:watches_window.is_open()
       call s:watches_window.close()
     endif
   endif
@@ -854,7 +854,10 @@ endfunction
 " Exit
 function! RubyDebugger.exit() dict
   if has_key(g:RubyDebugger,'remote')
-    if(!confirm("Quit remote program? (Use :RdbStop to disconnect without killing the remote)", "&Yes\n&No", 1))
+    let old_gui = set guioptions 
+    set guioptions += c
+    if(!confirm("Quit remote program? (Use :RdbStop to disconnect without killing the remote)", "&Yes\n&No", 0))
+      set guioptions = old_gui 
       return 0
     endif
   endif
@@ -1080,7 +1083,14 @@ endfunction
 " <processingException type="SyntaxError" message="some message" />
 " Just show exception message
 function! RubyDebugger.commands.processing_exception(cmd)
-  let attrs = s:get_tag_attributes(a:cmd) 
+  let attrs = s:get_tag_attributes(a:cmd)
+  if attrs.type == "NameError" && has_key(g:RubyDebugger,'watch_pending')
+    call s:log("Recieved NameError during pending watch operation for watch " . g:RubyDebugger.watch_pending)
+    let watch = s:WatchExpression.find_watch(g:RubyDebugger.watch_pending)
+    let watch.result = "undefined (out of scope?)"
+    unlet g:RubyDebugger.watch_pending
+    return
+  endif
   let message = "RubyDebugger Exception, type: " . attrs.type . ", message: " . attrs.message
   echo message
   call s:log(message)
@@ -1181,7 +1191,9 @@ endfunction
 " Close window
 function! s:Window.close() dict
   if !self.is_open()
-    throw "RubyDebug: Window " . self.name . " is not open"
+    "really, it's not a big deal
+    call s:log("RubyDebug: Window " . self.name . " is not open")
+    return
   endif
 
   if winnr("$") != 1
@@ -1190,7 +1202,7 @@ function! s:Window.close() dict
     exe "wincmd p"
   else
     " If this is only one window, just quit
-    :q
+    exe "q"
   endif
   call s:log("Closed window with name: " . self.name)
 endfunction
@@ -2558,6 +2570,7 @@ let RubyDebugger.logger = s:Logger.new(s:logger_file)
 let s:variables_window.logger = RubyDebugger.logger
 let s:breakpoints_window.logger = RubyDebugger.logger
 let s:frames_window.logger = RubyDebugger.logger
+let s:watches_window.logger = RubyDebugger.logger
 
 " *** Creating instances (end)
 
