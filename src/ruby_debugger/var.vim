@@ -10,7 +10,7 @@ function! s:Var.new(attrs)
     return s:VarParent.new(a:attrs)
   else
     return s:VarChild.new(a:attrs)
-  end
+  endif
 endfunction
 
 

@@ -11,7 +11,6 @@ function! s:WindowBreakpoints.bind_mappings()
   nnoremap <buffer> d :call <SID>window_breakpoints_delete_node()<cr>
 endfunction
 
-
 " Returns string that contains all breakpoints (for Window.display())
 function! s:WindowBreakpoints.render() dict
   let breakpoints = ""

@@ -6,11 +6,10 @@
 " Jump to file/line where execution was suspended, set current line sign and get local variables
 function! RubyDebugger.commands.jump_to_breakpoint(cmd) dict
   let attrs = s:get_tag_attributes(a:cmd) 
-  call s:jump_to_file(attrs.file, attrs.line)
+  call s:jump_to_file(s:rewrite_filename(attrs.file,'l'), attrs.line)
   call s:log("Jumped to breakpoint " . attrs.file . ":" . attrs.line)
-
   if has("signs")
-    exe ":sign place " . s:current_line_sign_id . " line=" . attrs.line . " name=current_line file=" . attrs.file
+    exe ":sign place " . s:current_line_sign_id . " line=" . attrs.line . " name=current_line file=" . s:rewrite_filename(attrs.file,'l')
   endif
 endfunction
 
@@ -41,6 +40,7 @@ function! RubyDebugger.commands.set_breakpoint(cmd)
   call s:log("Received the breakpoint message, will add PID and number of breakpoint to the Breakpoint object")
   let attrs = s:get_tag_attributes(a:cmd)
   let file_match = matchlist(attrs.location, '\(.*\):\(.*\)')
+  let file_match[1] = s:rewrite_filename(file_match[1],'l') 
   let pid = g:RubyDebugger.server.rdebug_pid
 
   " Find added breakpoint in array and assign debugger's info to it
@@ -60,14 +60,71 @@ function! RubyDebugger.commands.set_breakpoint(cmd)
   call g:RubyDebugger.queue.execute()
 endfunction
 
+function! RubyDebugger.commands.execute_watches(fill) dict
+  if !g:RubyDebugger.watch_queue.is_empty()
+    if a:fill
+      call s:log("Filling watch working queue with " . len(g:RubyDebugger.watch_queue.queue) . " watches")
+      let g:RubyDebugger.working_watch_queue = s:Queue.new()
+      let g:RubyDebugger.working_watch_queue.queue = copy(g:RubyDebugger.watch_queue.queue)
+    endif
+    if !g:RubyDebugger.working_watch_queue.is_empty()
+      let watch = g:RubyDebugger.working_watch_queue.unshift()
+      call s:log("Executing watch " . watch.id . " => ". watch.expr)
+      call g:RubyDebugger.queue.add('var inspect ' . watch.expr)
+      let g:RubyDebugger.watch_pending = watch
+      call g:RubyDebugger.queue.execute()
+    endif
+  endif
+endfunction
+
+function! RubyDebugger.commands.display_watch_result(tags) dict
+  call s:log("Displaying watch result")
+  let list_of_results = [] 
+
+  for tag in a:tags
+    let attrs = s:get_tag_attributes(tag)
+    let result = s:WatchResult.new(attrs)
+    call add(list_of_results, result)
+  endfor
+
+  if has_key(g:RubyDebugger, 'watch_pending') 
+    let watch = g:RubyDebugger.watch_pending
+    call s:log("Got initial inspection result for watch " . watch.id . " = " . string(list_of_results[0]))
+    let watch.result = list_of_results[0]
+    let watch.result.attributes.name = watch.expr
+    if s:watches_window.is_open()
+      call s:watches_window.open()
+    endif
+    unlet g:RubyDebugger.watch_pending
+    call g:RubyDebugger.commands.execute_watches(0)
+  else
+    call s:log("Inspecting in current watch")
+    let watch = g:RubyDebugger.current_watch
+    if watch != {}
+      call watch.add_childs(list_of_results)
+      call s:log("Got results for further inspection of " . watch.attributes.objectId)
+      call s:watches_window.open()
+    else
+      call s:log("Attempted to inspect an unknown variable")
+    endif
+    unlet g:RubyDebugger.current_watch
+  endif
+endfunction
 
 " <variables>
 "   <variable name="array" kind="local" value="Array (2 element(s))" type="Array" hasChildren="true" objectId="-0x2418a904"/>
 " </variables>
 " Assign list of got variables to parent variable and (optionally) show them
 function! RubyDebugger.commands.set_variables(cmd)
+  call s:log("Recieved variables command with " . a:cmd)
   let tags = s:get_tags(a:cmd)
   let list_of_variables = []
+  
+  if has_key(g:RubyDebugger, 'current_watch') || has_key(g:RubyDebugger, 'watch_pending')
+    call g:RubyDebugger.commands.display_watch_result(tags)
+    call s:log("returned from watch interrupt")
+    return 0
+  endif
 
   " Create hash from list of tags
   for tag in tags
@@ -163,8 +220,20 @@ function! RubyDebugger.commands.error(cmd)
   let error_match = s:get_inner_tags(a:cmd) 
   if !empty(error_match)
     let error = error_match[1]
-    echo "RubyDebugger Error: " . error
-    call s:log("Got error: " . error)
+    if error =~ '/There is no thread suspended/'
+      " find bad command
+      let error_cmd = matchstr(error,"/'.*")
+      let error_cmd = strpart(error_cmd,1,strlen(error_cmd)-1)
+      if g:RubyDebugger.interrupt_queue.is_empty()
+        call g:RubyDebugger.queue.add('interrupt')
+        call g:RubyDebugger.queue.execute()
+      endif
+      g:RubyDebugger.interrupt_queue.add(error_add)
+      echo "Couldn't execute : " . error_cmd . " so saving for later."
+    else
+      echo "RubyDebugger Error: " . error
+      call s:log("Got error: " . error)
+    endif
   endif
 endfunction
 
@@ -176,11 +245,12 @@ function! RubyDebugger.commands.message(cmd)
   if !empty(message_match)
     let message = message_match[1]
     echo "RubyDebugger Message: " . message
+    if message == "finished"
+      call g:RubyDebugger.stop()
+    endif
     call s:log("Got message: " . message)
   endif
 endfunction
 
-
 " *** End of debugger Commands 
-
 

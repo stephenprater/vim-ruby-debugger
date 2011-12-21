@@ -6,9 +6,9 @@ class VimRubyDebugger
   def initialize(params)
     @params = params
     create_directory(@params[:messages_file])
-    @rdebug = wait_for_opened_socket(@params[:host], @params[:rdebug_port])
-    log("Start TCPServer with host: #{@params[:host]} and port: #{@params[:vim_ruby_debugger_port]}")
-    @vim_ruby_debugger = TCPServer.new(@params[:host], @params[:vim_ruby_debugger_port])
+    @rdebug = wait_for_opened_socket(@params[:host], @params[:rdebug_port]) #this is the socket to the remote debugger
+    log("Start Debug Relay Server with host: #{@params[:host]} and port: #{@params[:rdebug_port]}")
+    @vim_ruby_debugger = TCPServer.new('127.0.0.1', @params[:relay_port]) #this is a socket to this program to relay the commands
     @queue = []
     @result = []
     @separator = "++vim-ruby-debugger separator++"
@@ -168,8 +168,8 @@ class VimRubyDebugger
     def log(string)
       if @params[:debug_mode] == '1'
         File.open(@params[:logger_file], 'a') do |f|
-          # match vim redir style new lines, rather than trailing
-          f << "\nRuby_debugger.rb, #{Time.now.strftime("%H:%M:%S")} : #{string.chomp}"
+          # match vim redir style new lines, rather than trailing 
+          f << "\nRuby_debugger.rb, #{Time.now.strftime("%H:%M:%S")} : #{string.chomp}" 
         end
       end
     end
@@ -177,10 +177,11 @@ class VimRubyDebugger
 end
 
 
+# renamed options to be the same as they are in the .vim file
 VimRubyDebugger.new(
   :host => ARGV[0],
   :rdebug_port => ARGV[1],
-  :vim_ruby_debugger_port => ARGV[2],
+  :relay_port => ARGV[2],
   :vim_executable => ARGV[3],
   :vim_servername => ARGV[4],
   :messages_file => ARGV[5],

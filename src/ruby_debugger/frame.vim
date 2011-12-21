@@ -9,7 +9,8 @@ let s:Frame = { }
 function! s:Frame.new(attrs)
   let var = copy(self)
   let var.no = a:attrs.no
-  let var.file = a:attrs.file
+  let var.remote_file = a:attrs.file
+  let var.file = s:rewrite_filename(var.remote_file,'l')
   let var.line = a:attrs.line
   if has_key(a:attrs, 'current')
     let var.current = (a:attrs.current == 'true')
@@ -45,6 +46,12 @@ endfunction
 
 " Open frame in existed/new window
 function! s:Frame.open() dict
+  " when we open the frame, rewrite the variables
+  let cmd = 'frame ' . self.no . '; ' . 'var local'
+  " empty the variables so it will redraw
+  let g:RubyDebugger.variables = {} 
+  call g:RubyDebugger.queue.add(cmd)
+  call g:RubyDebugger.queue.execute()
   call s:jump_to_file(self.file, self.line)
 endfunction
 

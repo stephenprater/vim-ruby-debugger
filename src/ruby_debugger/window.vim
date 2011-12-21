@@ -132,7 +132,7 @@ function! s:Window.toggle() dict
     call self.close()
   else
     call self.open()
-  end
+  endif
 endfunction
 
 

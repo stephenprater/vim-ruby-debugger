@@ -124,14 +124,37 @@ function! s:get_filename()
   return expand("%:p")
 endfunction
 
-
+"rewrite local to remote filenames and vice versa
+function! s:rewrite_filename(file_name, type)
+  let file_name = a:file_name
+  if !has_key(g:RubyDebugger,'remote')
+    return file_name 
+  else
+    let old_filename = copy(file_name)
+    if a:type == 'remote' || a:type == 'r'
+      let new_file_name = substitute(file_name, g:RubyDebugger.local_directory, g:RubyDebugger.remote_directory,"g")
+    elseif a:type == 'local' || a:type == 'l'
+      let new_file_name = substitute(file_name, g:RubyDebugger.remote_directory, g:RubyDebugger.local_directory, "g")
+    endif
+    if old_filename == new_file_name
+      call s:log("Did not rewrite " . old_filename)
+    else
+      call s:log("Rewrote " . old_filename . " to " . new_file_name)
+    endif
+    return new_file_name
+  endif
+  return file_name
+endfunction
+      
 " Send message to debugger. This function should never be used explicitly,
 " only through g:RubyDebugger.send_command function
 function! s:send_message_to_debugger(message)
+  " the ruby_debugger proxy can be counted on to be running locally - so just 
+  " send directly to 127.0.0.1:39768 - which is the local proxy
   call s:log("Sending a message to ruby_debugger.rb: '" . a:message . "'")
   if g:ruby_debugger_fast_sender
     call s:log("Trying to use experimental 'fast_sender'")
-    let cmd = s:runtime_dir . "/bin/socket " . s:hostname . " " . s:debugger_port . " \"" . a:message . "\""
+    let cmd = s:runtime_dir . "/bin/socket 127.0.0.1  " . s:relay_port . " \"" . a:message . "\""
     call s:log("Executing command: " . cmd)
     call system(cmd)
   else
@@ -141,8 +164,8 @@ ruby << RUBY
   require 'socket'
   attempts = 0
   a = nil
-  host = VIM::evaluate("s:hostname")
-  port = VIM::evaluate("s:debugger_port")
+  host = '127.0.0.1'
+  port = VIM::evaluate("s:relay_port")
   message = VIM::evaluate("a:message").gsub("\\\"", '"')
   begin
     a = TCPSocket.open(host, port)
@@ -166,7 +189,7 @@ RUBY
       let script .= "attempts = 0; "
       let script .= "a = nil; "
       let script .= "begin; "
-      let script .=   "a = TCPSocket.open('" . s:hostname . "', " . s:debugger_port . "); "
+      let script .=   "a = TCPSocket.open('127.0.0.1', " . s:relay_port . "); "
       let script .=   "a.puts(%q[" . substitute(substitute(a:message, '[', '\[', 'g'), ']', '\]', 'g') . "]);"
       let script .=   "a.close; "
       let script .= "rescue Errno::ECONNREFUSED; "
@@ -175,7 +198,7 @@ RUBY
       let script .=     "sleep 0.05; "
       let script .=     "retry; "
       let script .=   "else; "
-      let script .=     "puts('" . s:hostname . ":" . s:debugger_port . " can not be opened'); "
+      let script .=     "puts('127.0.0.1':" . s:relay_port . " can not be opened'); "
       let script .=     "exit; "
       let script .=   "end; "
       let script .= "ensure; "
@@ -215,7 +238,6 @@ function! s:clear_current_state()
 endfunction
 
 
-" Open given file and jump to given line
 " (stolen from NERDTree)
 function! s:jump_to_file(file, line)
   "if the file is already open in this tab then just stick the cursor in it
@@ -234,6 +256,7 @@ function! s:jump_to_file(file, line)
     exe "edit " . a:file
   endif
   exe "normal " . a:line . "G"
+  exe "normal zz" 
 endfunction
 
 
@@ -287,7 +310,6 @@ function! s:buf_in_windows(buffer_number)
 
   return count
 endfunction 
-
 
 " Find first 'normal' window (not quickfix, explorer, etc)
 function! s:first_normal_window()

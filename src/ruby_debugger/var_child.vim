@@ -129,7 +129,6 @@ function! s:VarChild._render(depth, draw_text, vertical_map, is_last_child)
 
     endif
   endif
-
   return output
 
 endfunction

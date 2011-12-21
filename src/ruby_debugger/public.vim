@@ -1,14 +1,34 @@
 " *** Public interface (start)
 
-let RubyDebugger = { 'commands': {}, 'variables': {}, 'settings': {}, 'breakpoints': [], 'frames': [], 'exceptions': [] }
+let RubyDebugger = { 
+    \ 'commands': {}, 
+    \ 'variables': {}, 
+    \ 'settings': {},
+    \ 'watch_results': [], 
+    \ 'breakpoints': [], 
+    \ 'frames': [], 
+    \ 'exceptions': [],
+    \ 'status': 'inactive'
+  \}
+
 let g:RubyDebugger.queue = s:Queue.new()
+
+" this queue lets us give it things to do as soon as there's a thread to
+" execute them in, particularly loading files
+let g:RubyDebugger.interrupt_queue = s:Queue.new()
+
+" this queue is for watches - we can only send one watch at a time
+" to the server because the response is async.  however,
+" the debugger itself is single threaded, so you can count
+" on them coming back in the same order they left in
+let g:RubyDebugger.watch_queue = s:Queue.new()
 
 
 " Run debugger server. It takes one optional argument with path to debugged
 " ruby script ('script/server webrick' by default)
 function! RubyDebugger.start(...) dict
   call s:log("Executing :Rdebugger...")
-  let g:RubyDebugger.server = s:Server.new(s:hostname, s:rdebug_port, s:debugger_port, s:runtime_dir, s:tmp_file, s:server_output_file)
+  let g:RubyDebugger.server = s:Server.new(s:hostname, s:rdebug_port, s:relay_port, s:runtime_dir, s:tmp_file, s:server_output_file)
   let script_string = a:0 && !empty(a:1) ? a:1 : g:ruby_debugger_default_script
   echo "Loading debugger..."
   call g:RubyDebugger.server.start(s:get_escaped_absolute_path(script_string))
@@ -19,22 +39,75 @@ function! RubyDebugger.start(...) dict
   endfor
   call g:RubyDebugger.queue.add('start')
   echo "Debugger started"
+  let g:RubyDebugger.status = 'local'
   call g:RubyDebugger.queue.execute()
+  doauto User RdbActivate
 endfunction
 
+"Connect to a remote debugger
+function! RubyDebugger.connect(...) dict
+  if empty(a:1)
+    echoerr "Need <server>:<port> <remote dir> <local dir>"
+  endif
+  call s:log("Executing :Rdebugger Connect...")
+  let server_params = split(a:1, ':')
+  echo server_params
+  let server_name = server_params[0]
+  let server_port = server_params[1]
+
+  let s:hostname = server_name
+  let s:rdebug_port = server_port
+
+  let g:RubyDebugger.remote = 1
+  let g:RubyDebugger.remote_directory = a:2
+  let g:RubyDebugger.local_directory = a:3
+
+  let g:RubyDebugger.server = s:Server.new_remote(s:hostname, s:rdebug_port, s:relay_port, s:runtime_dir, s:tmp_file, s:server_output_file)
+  call g:RubyDebugger.server.connect()
+
+  let g:RubyDebugger.exceptions = []
+  for breakpoint in g:RubyDebugger.breakpoints
+    call g:RubyDebugger.queue.add(breakpoint.command())
+  endfor
+  call g:RubyDebugger.queue.add('start')
+  echo "Debugger connected!"
+  let g:RubyDebugger.status = 'remote'
+  call g:RubyDebugger.queue.execute()
+  doauto User RdbActivate
+endfunction
 
 " Stop running server.
 function! RubyDebugger.stop() dict
-  if has_key(g:RubyDebugger, 'server')
-    call g:RubyDebugger.server.stop()
+  if has_key(g:RubyDebugger, 'remote')
+    let s:hostname = s:default_hostname
+    let s:rdebug_port = s:default_rdebug_port
+    unlet g:RubyDebugger.remote
+  endif
+  call g:RubyDebugger.server.stop()
+  let g:RubyDebugger.status = 'inactive'
+  doauto User RdbDeactivate
+endfunction
+
+"send interrupt to the server
+function! RubyDebugger.interrupt() dict
+  call s:log("Will send interrupt if program is running")
+  if has_key(g:RubyDebugger,'remote') || has_key(g:RubyDebugger, 'server')  && g:RubyDebugger.server.is_running
+    call g:RubyDebugger.queue.add('interrupt')
+    call g:RubyDebugger.queue.execute()
   endif
 endfunction
 
-function! RubyDebugger.is_running()
-  if has_key(g:RubyDebugger, 'server')
-    return g:RubyDebugger.server.is_running()
+function! RubyDebugger.watch(expr) dict
+  call s:log("Adding watch expression '" . a:expr . "'")
+  let watch_expression = s:WatchExpression.new(a:expr)
+  call g:RubyDebugger.watch_queue.add(watch_expression)
+  call add(g:RubyDebugger.watch_results, watch_expression) 
+  if s:watches_window.is_open()
+    call s:watches_window.open()
+    exe "wincmd p"
   endif
-  return 0
+  call s:log("Executing watches")
+  call g:RubyDebugger.commands.execute_watches(1)
 endfunction
 
 " This function receives commands from the debugger. When ruby_debugger.rb
@@ -47,20 +120,25 @@ function! RubyDebugger.receive_command() dict
   let file_contents = join(readfile(s:tmp_file), "")
   call s:log("Received command: " . file_contents)
   let commands = split(file_contents, s:separator)
+  let watch_trigger = 0
   for cmd in commands
     if !empty(cmd)
       if match(cmd, '<breakpoint ') != -1
         call g:RubyDebugger.commands.jump_to_breakpoint(cmd)
+        let watch_trigger = 1
       elseif match(cmd, '<suspended ') != -1
         call g:RubyDebugger.commands.jump_to_breakpoint(cmd)
+        let watch_trigger = 1
       elseif match(cmd, '<exception ') != -1
         call g:RubyDebugger.commands.handle_exception(cmd)
+        let watch_trigger = 1
       elseif match(cmd, '<breakpointAdded ') != -1
         call g:RubyDebugger.commands.set_breakpoint(cmd)
       elseif match(cmd, '<catchpointSet ') != -1
         call g:RubyDebugger.commands.set_exception(cmd)
       elseif match(cmd, '<variables>') != -1
         call g:RubyDebugger.commands.set_variables(cmd)
+        call s:log("returning from variables")
       elseif match(cmd, '<error>') != -1
         call g:RubyDebugger.commands.error(cmd)
       elseif match(cmd, '<message>') != -1
@@ -74,7 +152,10 @@ function! RubyDebugger.receive_command() dict
       endif
     endif
   endfor
-  call g:RubyDebugger.queue.after_hook()
+  if watch_trigger && !g:RubyDebugger.watch_queue.is_empty()
+    call s:log("Executing watches by filling from watch_queue")
+    call g:RubyDebugger.commands.execute_watches(1)
+  end
   call g:RubyDebugger.queue.execute()
 endfunction
 
@@ -86,6 +167,52 @@ endfunction
 " We set function this way, because we want have possibility to mock it by
 " other function in tests
 let RubyDebugger.send_command = function("<SID>send_message_to_debugger")
+
+function! RubyDebugger.set_mappings() dict
+  noremap <leader>s :RdbStep<CR>
+  noremap <leader>f :RdbFinish<CR>
+  noremap <leader>n :RdbNext<CR>
+  noremap <leader>c :RdbContinue<CR>
+  noremap <leader>e :RdbEval<Space>
+endfunction
+
+function! RubyDebugger.unset_mappings() dict
+  nunmap <leader>s
+  nunmap <leader>f
+  nunmap <leader>n
+  nunmap <leader>c
+  nunmap <leader>e
+endfunction
+
+function! RubyDebugger.debugger_workspace(op) dict
+  if (a:op == 'open')
+    if !(s:variables_window.is_open())
+      call s:variables_window.open()
+    endif
+    if !(s:frames_window.is_open())
+      call s:frames_window.open()
+    endif
+    if !(s:breakpoints_window.is_open())
+      call s:breakpoints_window.open()
+    endif
+    if !(s:watches_window.is_open())
+      call s:watches_window.open()
+    endif
+  elseif (a:op == 'close')
+    if s:variables_window.is_open()
+      call s:variables_window.close()
+    endif
+    if s:frames_window.is_open()
+      call s:frames_window.close()
+    endif
+    if s:breakpoints_window.is_open()
+      call s:breakpoints_window.close()
+    endif
+    if !(s:watches_window.is_open())
+      call s:watches_window.close()
+    endif
+  endif
+endfunction
 
 
 " Open variables window
@@ -103,6 +230,12 @@ function! RubyDebugger.open_breakpoints() dict
   call g:RubyDebugger.queue.execute()
 endfunction
 
+"Open Watches
+function! RubyDebugger.open_watches() dict
+  call s:watches_window.toggle()
+  call s:log("Opened watches window")
+  call g:RubyDebugger.queue.execute()
+endfunction
 
 " Open frames window
 function! RubyDebugger.open_frames() dict
@@ -111,13 +244,21 @@ function! RubyDebugger.open_frames() dict
   call g:RubyDebugger.queue.execute()
 endfunction
 
+"Order the debugger to reload the file
+function! RubyDebugger.reload_file(file) dict
+  let remote_file = s:rewrite_filename(a:file,'r')
+  call g:RubyDebugger.queue.add("load " . remote_file)
+  call g:RubyDebugger.queue.execute()
+endfunction
 
 " Set/remove breakpoint at current position. If argument
 " is given, it will set conditional breakpoint (argument is condition)
 function! RubyDebugger.toggle_breakpoint(...) dict
   let line = line(".")
   let file = s:get_filename()
-  call s:log("Trying to toggle a breakpoint in the file " . file . ":" . line)
+  " that's basically just for the log
+  let remote_file = s:rewrite_filename(file,'r')
+  call s:log("Trying to toggle a breakpoint in the file " . (remote_file ? remote_file : file) . ":" . line)
   let existed_breakpoints = filter(copy(g:RubyDebugger.breakpoints), 'v:val.line == ' . line . ' && v:val.file == "' . escape(file, '\') . '"')
   " If breakpoint with current file/line doesn't exist, create it. Otherwise -
   " remove it
@@ -239,9 +380,15 @@ endfunction
 
 " Exit
 function! RubyDebugger.exit() dict
+  if has_key(g:RubyDebugger,'remote')
+    if(!confirm("Quit remote program? (Use :RdbStop to disconnect without killing the remote)", "&Yes\n&No", 1))
+      return 0
+    endif
+  endif
   call g:RubyDebugger.queue.add("exit")
   call s:clear_current_state()
   call g:RubyDebugger.queue.execute()
+  call g:RubyDebugger.stop()
 endfunction
 
 
