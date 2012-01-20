@@ -214,6 +214,10 @@ function! s:rewrite_filename(file_name, type)
   if !has_key(g:RubyDebugger,'remote')
     return file_name 
   else
+    if !has_key(g:RubyDebugger,'local_directory')
+      call s:log("Did not rewrite " . file_name)
+      return file_name
+    endif
     let old_filename = copy(file_name)
     if a:type == 'remote' || a:type == 'r'
       let new_file_name = substitute(file_name, g:RubyDebugger.local_directory, g:RubyDebugger.remote_directory,"g")
@@ -519,7 +523,9 @@ endfunction
 function! RubyDebugger.connect(...) dict
   if empty(a:1)
     echoerr "Need <server>:<port> <remote dir> <local dir>"
+    return
   endif
+
   call s:log("Executing :Rdebugger Connect...")
   let server_params = split(a:1, ':')
   echo server_params
@@ -530,8 +536,10 @@ function! RubyDebugger.connect(...) dict
   let s:rdebug_port = server_port
 
   let g:RubyDebugger.remote = 1
-  let g:RubyDebugger.remote_directory = a:2
-  let g:RubyDebugger.local_directory = a:3
+  if len(a:000) > 1 
+    let g:RubyDebugger.remote_directory = a:2
+    let g:RubyDebugger.local_directory = a:3
+  endif
 
   let g:RubyDebugger.server = s:Server.new_remote(s:hostname, s:rdebug_port, s:relay_port, s:runtime_dir, s:tmp_file, s:server_output_file)
   call g:RubyDebugger.server.connect()
@@ -628,7 +636,7 @@ function! RubyDebugger.receive_command() dict
   if watch_trigger && !g:RubyDebugger.watch_queue.is_empty()
     call s:log("Executing watches by filling from watch_queue")
     call g:RubyDebugger.commands.execute_watches(1)
-  end
+  endif
   call g:RubyDebugger.queue.execute()
 endfunction
 
@@ -1080,7 +1088,14 @@ endfunction
 " <processingException type="SyntaxError" message="some message" />
 " Just show exception message
 function! RubyDebugger.commands.processing_exception(cmd)
-  let attrs = s:get_tag_attributes(a:cmd) 
+  let attrs = s:get_tag_attributes(a:cmd)
+  if attrs.type == "NameError" && has_key(g:RubyDebugger,'watch_pending')
+    call s:log("Recieved NameError during pending watch operation for watch " . g:RubyDebugger.watch_pending)
+    let watch = s:WatchExpression.find_watch(g:RubyDebugger.watch_pending)
+    let watch.result = "undefined (out of scope?)"
+    unlet g:RubyDebugger.watch_pending
+    return
+  endif
   let message = "RubyDebugger Exception, type: " . attrs.type . ", message: " . attrs.message
   echo message
   call s:log(message)

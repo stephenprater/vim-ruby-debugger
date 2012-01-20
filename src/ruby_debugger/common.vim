@@ -130,6 +130,10 @@ function! s:rewrite_filename(file_name, type)
   if !has_key(g:RubyDebugger,'remote')
     return file_name 
   else
+    if !has_key(g:RubyDebugger,'local_directory')
+      call s:log("Did not rewrite " . file_name)
+      return file_name
+    endif
     let old_filename = copy(file_name)
     if a:type == 'remote' || a:type == 'r'
       let new_file_name = substitute(file_name, g:RubyDebugger.local_directory, g:RubyDebugger.remote_directory,"g")

@@ -48,7 +48,9 @@ endfunction
 function! RubyDebugger.connect(...) dict
   if empty(a:1)
     echoerr "Need <server>:<port> <remote dir> <local dir>"
+    return
   endif
+
   call s:log("Executing :Rdebugger Connect...")
   let server_params = split(a:1, ':')
   echo server_params
@@ -59,8 +61,10 @@ function! RubyDebugger.connect(...) dict
   let s:rdebug_port = server_port
 
   let g:RubyDebugger.remote = 1
-  let g:RubyDebugger.remote_directory = a:2
-  let g:RubyDebugger.local_directory = a:3
+  if len(a:000) > 1 
+    let g:RubyDebugger.remote_directory = a:2
+    let g:RubyDebugger.local_directory = a:3
+  endif
 
   let g:RubyDebugger.server = s:Server.new_remote(s:hostname, s:rdebug_port, s:relay_port, s:runtime_dir, s:tmp_file, s:server_output_file)
   call g:RubyDebugger.server.connect()
