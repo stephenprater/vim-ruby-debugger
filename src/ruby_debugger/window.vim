@@ -26,7 +26,9 @@ endfunction
 " Close window
 function! s:Window.close() dict
   if !self.is_open()
-    throw "RubyDebug: Window " . self.name . " is not open"
+    "really, it's not a big deal
+    call s:log("RubyDebug: Window " . self.name . " is not open")
+    return
   endif
 
   if winnr("$") != 1
@@ -35,7 +37,7 @@ function! s:Window.close() dict
     exe "wincmd p"
   else
     " If this is only one window, just quit
-    :q
+    exe "q"
   endif
   call s:log("Closed window with name: " . self.name)
 endfunction

@@ -689,7 +689,7 @@ function! RubyDebugger.debugger_workspace(op) dict
     if s:breakpoints_window.is_open()
       call s:breakpoints_window.close()
     endif
-    if !(s:watches_window.is_open())
+    if s:watches_window.is_open()
       call s:watches_window.close()
     endif
   endif
@@ -862,7 +862,10 @@ endfunction
 " Exit
 function! RubyDebugger.exit() dict
   if has_key(g:RubyDebugger,'remote')
-    if(!confirm("Quit remote program? (Use :RdbStop to disconnect without killing the remote)", "&Yes\n&No", 1))
+    let old_gui = set guioptions 
+    set guioptions += c
+    if(!confirm("Quit remote program? (Use :RdbStop to disconnect without killing the remote)", "&Yes\n&No", 0))
+      set guioptions = old_gui 
       return 0
     endif
   endif
@@ -1196,7 +1199,9 @@ endfunction
 " Close window
 function! s:Window.close() dict
   if !self.is_open()
-    throw "RubyDebug: Window " . self.name . " is not open"
+    "really, it's not a big deal
+    call s:log("RubyDebug: Window " . self.name . " is not open")
+    return
   endif
 
   if winnr("$") != 1
@@ -1205,7 +1210,7 @@ function! s:Window.close() dict
     exe "wincmd p"
   else
     " If this is only one window, just quit
-    :q
+    exe "q"
   endif
   call s:log("Closed window with name: " . self.name)
 endfunction
@@ -2573,6 +2578,7 @@ let RubyDebugger.logger = s:Logger.new(s:logger_file)
 let s:variables_window.logger = RubyDebugger.logger
 let s:breakpoints_window.logger = RubyDebugger.logger
 let s:frames_window.logger = RubyDebugger.logger
+let s:watches_window.logger = RubyDebugger.logger
 
 " *** Creating instances (end)
 
